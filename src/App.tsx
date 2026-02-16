@@ -10,6 +10,8 @@ import Crops from "./pages/Crops";
 import Livestock from "./pages/Livestock";
 import Inventory from "./pages/Inventory";
 import Schedule from "./pages/Schedule";
+import Workers from "./pages/Workers";
+import Reports from "./pages/Reports";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +30,8 @@ const App = () => (
           <Route path="/livestock" element={<Livestock />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/schedule" element={<Schedule />} />
+          <Route path="/workers" element={<Workers />} />
+          <Route path="/reports" element={<Reports />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
