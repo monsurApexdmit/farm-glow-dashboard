@@ -36,6 +36,10 @@ const App = () => (
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/workers" element={<Workers />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/finances" element={<Finances />} />
+          <Route path="/field-map" element={<FieldMap />} />
+          <Route path="/notifications" element={<Notifications />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
