@@ -12,6 +12,10 @@ import Inventory from "./pages/Inventory";
 import Schedule from "./pages/Schedule";
 import Workers from "./pages/Workers";
 import Reports from "./pages/Reports";
+import Settings from "./pages/Settings";
+import Finances from "./pages/Finances";
+import FieldMap from "./pages/FieldMap";
+import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
