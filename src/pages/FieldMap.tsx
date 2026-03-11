@@ -1,42 +1,177 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Sprout, Droplets, Thermometer, MapPin } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Slider } from "@/components/ui/slider";
+import { Sprout, Droplets, Thermometer, MapPin, Plus, Pencil, Trash2, GripVertical, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+
+type PlotStatus = "growing" | "harvest-ready" | "fallow" | "planted";
 
 interface FieldPlot {
   id: string;
   name: string;
   crop: string;
   area: string;
-  status: "growing" | "harvest-ready" | "fallow" | "planted";
+  status: PlotStatus;
   soilMoisture: number;
   temperature: number;
-  color: string;
-  gridArea: string;
+  // Grid-cell positioning
+  row: number;
+  col: number;
+  rowSpan: number;
+  colSpan: number;
 }
 
-const plots: FieldPlot[] = [
-  { id: "A1", name: "North Field", crop: "Wheat", area: "12 acres", status: "growing", soilMoisture: 68, temperature: 24, color: "hsl(var(--chart-green))", gridArea: "1 / 1 / 3 / 3" },
-  { id: "A2", name: "East Paddock", crop: "Corn", area: "8 acres", status: "harvest-ready", soilMoisture: 55, temperature: 26, color: "hsl(var(--chart-gold))", gridArea: "1 / 3 / 2 / 5" },
-  { id: "B1", name: "South Valley", crop: "Rice", area: "15 acres", status: "growing", soilMoisture: 85, temperature: 28, color: "hsl(var(--chart-blue))", gridArea: "3 / 1 / 5 / 2" },
-  { id: "B2", name: "West Hills", crop: "Barley", area: "6 acres", status: "planted", soilMoisture: 72, temperature: 22, color: "hsl(var(--chart-brown))", gridArea: "3 / 2 / 4 / 4" },
-  { id: "B3", name: "Creek Side", crop: "Soybeans", area: "10 acres", status: "growing", soilMoisture: 78, temperature: 25, color: "hsl(142 45% 55%)", gridArea: "2 / 3 / 4 / 5" },
-  { id: "C1", name: "Hilltop", crop: "—", area: "4 acres", status: "fallow", soilMoisture: 40, temperature: 23, color: "hsl(var(--muted))", gridArea: "4 / 2 / 5 / 4" },
-  { id: "C2", name: "Orchard Edge", crop: "Oats", area: "5 acres", status: "planted", soilMoisture: 65, temperature: 21, color: "hsl(38 60% 60%)", gridArea: "4 / 4 / 5 / 5" },
+const statusOptions: { value: PlotStatus; label: string }[] = [
+  { value: "growing", label: "Growing" },
+  { value: "harvest-ready", label: "Harvest Ready" },
+  { value: "planted", label: "Planted" },
+  { value: "fallow", label: "Fallow" },
 ];
 
-const statusColors: Record<string, string> = {
-  growing: "bg-primary/15 text-primary",
-  "harvest-ready": "bg-accent/15 text-accent-foreground",
-  fallow: "bg-muted text-muted-foreground",
-  planted: "bg-secondary text-secondary-foreground",
+const cropOptions = ["Wheat", "Corn", "Rice", "Barley", "Soybeans", "Oats", "Potatoes", "Cotton", "—"];
+
+const statusColors: Record<PlotStatus, string> = {
+  growing: "bg-primary/15 text-primary border-primary/30",
+  "harvest-ready": "bg-accent/15 text-accent-foreground border-accent/30",
+  fallow: "bg-muted text-muted-foreground border-muted-foreground/20",
+  planted: "bg-secondary text-secondary-foreground border-secondary-foreground/20",
 };
 
+const statusBgColors: Record<PlotStatus, string> = {
+  growing: "hsla(142, 45%, 42%, 0.12)",
+  "harvest-ready": "hsla(38, 80%, 55%, 0.12)",
+  fallow: "hsl(var(--muted))",
+  planted: "hsla(142, 45%, 55%, 0.10)",
+};
+
+const initialPlots: FieldPlot[] = [
+  { id: "A1", name: "North Field", crop: "Wheat", area: "12", status: "growing", soilMoisture: 68, temperature: 24, row: 0, col: 0, rowSpan: 2, colSpan: 2 },
+  { id: "A2", name: "East Paddock", crop: "Corn", area: "8", status: "harvest-ready", soilMoisture: 55, temperature: 26, row: 0, col: 2, rowSpan: 1, colSpan: 2 },
+  { id: "B1", name: "South Valley", crop: "Rice", area: "15", status: "growing", soilMoisture: 85, temperature: 28, row: 2, col: 0, rowSpan: 2, colSpan: 1 },
+  { id: "B2", name: "West Hills", crop: "Barley", area: "6", status: "planted", soilMoisture: 72, temperature: 22, row: 2, col: 1, rowSpan: 1, colSpan: 2 },
+  { id: "B3", name: "Creek Side", crop: "Soybeans", area: "10", status: "growing", soilMoisture: 78, temperature: 25, row: 1, col: 2, rowSpan: 2, colSpan: 2 },
+  { id: "C1", name: "Hilltop", crop: "—", area: "4", status: "fallow", soilMoisture: 40, temperature: 23, row: 3, col: 1, rowSpan: 1, colSpan: 2 },
+  { id: "C2", name: "Orchard Edge", crop: "Oats", area: "5", status: "planted", soilMoisture: 65, temperature: 21, row: 3, col: 3, rowSpan: 1, colSpan: 1 },
+];
+
+const GRID_COLS = 6;
+const GRID_ROWS = 6;
+
+const emptyPlot = (): Omit<FieldPlot, "id"> => ({
+  name: "",
+  crop: "—",
+  area: "5",
+  status: "fallow",
+  soilMoisture: 50,
+  temperature: 22,
+  row: 0,
+  col: 0,
+  rowSpan: 1,
+  colSpan: 1,
+});
+
 const FieldMap = () => {
+  const [plots, setPlots] = useState<FieldPlot[]>(initialPlots);
   const [selected, setSelected] = useState<FieldPlot | null>(null);
+  const [editDialog, setEditDialog] = useState(false);
+  const [addDialog, setAddDialog] = useState(false);
+  const [editForm, setEditForm] = useState<FieldPlot | null>(null);
+  const [addForm, setAddForm] = useState<Omit<FieldPlot, "id">>(emptyPlot());
+  const [dragPlot, setDragPlot] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState<{ row: number; col: number } | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const { toast } = useToast();
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  const nextId = () => {
+    const letters = "ABCDEFGHIJ";
+    const existing = plots.map((p) => p.id);
+    for (let l = 0; l < letters.length; l++) {
+      for (let n = 1; n <= 9; n++) {
+        const id = `${letters[l]}${n}`;
+        if (!existing.includes(id)) return id;
+      }
+    }
+    return `P${plots.length + 1}`;
+  };
+
+  // --- Add ---
+  const handleAdd = () => {
+    if (!addForm.name.trim()) {
+      toast({ title: "Name required", description: "Please enter a plot name.", variant: "destructive" });
+      return;
+    }
+    const newPlot: FieldPlot = { ...addForm, id: nextId() };
+    setPlots((prev) => [...prev, newPlot]);
+    setAddDialog(false);
+    setAddForm(emptyPlot());
+    toast({ title: "Plot added", description: `${newPlot.name} has been added to the map.` });
+  };
+
+  // --- Edit ---
+  const openEdit = (plot: FieldPlot) => {
+    setEditForm({ ...plot });
+    setEditDialog(true);
+  };
+  const handleEdit = () => {
+    if (!editForm) return;
+    setPlots((prev) => prev.map((p) => (p.id === editForm.id ? editForm : p)));
+    setSelected(editForm);
+    setEditDialog(false);
+    toast({ title: "Plot updated", description: `${editForm.name} has been updated.` });
+  };
+
+  // --- Delete ---
+  const handleDelete = (id: string) => {
+    setPlots((prev) => prev.filter((p) => p.id !== id));
+    if (selected?.id === id) setSelected(null);
+    toast({ title: "Plot removed", description: "The plot has been deleted from the map." });
+  };
+
+  // --- Drag & Drop ---
+  const handleDragStart = (e: React.DragEvent, plotId: string) => {
+    setDragPlot(plotId);
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleCellDragOver = (e: React.DragEvent, row: number, col: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver({ row, col });
+  };
+
+  const handleCellDrop = (e: React.DragEvent, row: number, col: number) => {
+    e.preventDefault();
+    if (!dragPlot) return;
+    setPlots((prev) =>
+      prev.map((p) => (p.id === dragPlot ? { ...p, row, col } : p))
+    );
+    // Update selected if it was the dragged plot
+    setSelected((prev) => (prev?.id === dragPlot ? { ...prev, row, col } : prev));
+    setDragPlot(null);
+    setDragOver(null);
+    toast({ title: "Plot moved", description: "Plot position updated on the map." });
+  };
+
+  // Build occupied cell map (for background grid)
+  const occupiedCells = new Set<string>();
+  plots.forEach((p) => {
+    for (let r = p.row; r < p.row + p.rowSpan; r++) {
+      for (let c = p.col; c < p.col + p.colSpan; c++) {
+        occupiedCells.add(`${r}-${c}`);
+      }
+    }
+  });
+
+  const totalArea = plots.reduce((s, p) => s + parseFloat(p.area || "0"), 0);
 
   return (
     <div className="flex min-h-screen w-full">
@@ -44,14 +179,18 @@ const FieldMap = () => {
       <div className="flex-1 flex flex-col min-w-0">
         <DashboardHeader />
         <main className="flex-1 p-6 overflow-auto space-y-6">
-          <div className="flex items-center justify-between">
+          {/* Header */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
             <h1 className="text-3xl font-bold font-display">Field Map</h1>
-            <div className="flex gap-2">
-              {["growing", "harvest-ready", "planted", "fallow"].map((s) => (
-                <Badge key={s} variant="outline" className={statusColors[s]}>
-                  {s.replace("-", " ")}
+            <div className="flex items-center gap-2 flex-wrap">
+              {statusOptions.map((s) => (
+                <Badge key={s.value} variant="outline" className={statusColors[s.value]}>
+                  {s.label}
                 </Badge>
               ))}
+              <Button size="sm" onClick={() => { setAddForm(emptyPlot()); setAddDialog(true); }} className="gap-1">
+                <Plus className="w-4 h-4" /> Add Plot
+              </Button>
             </div>
           </div>
 
@@ -59,34 +198,104 @@ const FieldMap = () => {
             {/* Map Grid */}
             <div className="lg:col-span-2">
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2"><MapPin className="w-5 h-5" /> Farm Layout</CardTitle>
-                  <CardDescription>Click a plot to view details</CardDescription>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="text-lg flex items-center gap-2"><MapPin className="w-5 h-5" /> Farm Layout</CardTitle>
+                      <CardDescription className="flex items-center gap-1 mt-1">
+                        <Move className="w-3.5 h-3.5" /> Drag plots to reposition · Click to view details
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}>
+                        <ZoomOut className="w-4 h-4" />
+                      </Button>
+                      <span className="text-xs text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.min(1.5, z + 0.1))}>
+                        <ZoomIn className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="overflow-auto">
                   <div
-                    className="grid gap-2"
+                    ref={gridRef}
+                    className="relative"
                     style={{
-                      gridTemplateColumns: "repeat(4, 1fr)",
-                      gridTemplateRows: "repeat(4, 80px)",
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+                      gridTemplateRows: `repeat(${GRID_ROWS}, ${70 * zoom}px)`,
+                      gap: `${3 * zoom}px`,
+                      transform: `scale(${zoom})`,
+                      transformOrigin: "top left",
+                      width: `${100 / zoom}%`,
                     }}
                   >
+                    {/* Background empty cells */}
+                    {Array.from({ length: GRID_ROWS * GRID_COLS }).map((_, i) => {
+                      const row = Math.floor(i / GRID_COLS);
+                      const col = i % GRID_COLS;
+                      const isOver = dragOver?.row === row && dragOver?.col === col;
+                      return (
+                        <div
+                          key={`cell-${row}-${col}`}
+                          className={`rounded-md border border-dashed transition-colors ${
+                            isOver ? "border-primary bg-primary/10" : "border-border/40 bg-muted/20"
+                          }`}
+                          style={{ gridRow: row + 1, gridColumn: col + 1 }}
+                          onDragOver={(e) => handleCellDragOver(e, row, col)}
+                          onDragLeave={() => setDragOver(null)}
+                          onDrop={(e) => handleCellDrop(e, row, col)}
+                        />
+                      );
+                    })}
+
+                    {/* Plot tiles */}
                     {plots.map((plot) => (
-                      <button
+                      <div
                         key={plot.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, plot.id)}
+                        onDragEnd={() => { setDragPlot(null); setDragOver(null); }}
                         onClick={() => setSelected(plot)}
-                        className={`rounded-lg border-2 p-3 text-left transition-all hover:scale-[1.02] hover:shadow-md ${
-                          selected?.id === plot.id ? "border-primary ring-2 ring-primary/30" : "border-border"
-                        }`}
+                        className={`relative rounded-lg border-2 p-3 text-left transition-all cursor-grab active:cursor-grabbing hover:shadow-lg group z-10 ${
+                          selected?.id === plot.id
+                            ? "border-primary ring-2 ring-primary/30 shadow-md"
+                            : "border-border hover:border-primary/40"
+                        } ${dragPlot === plot.id ? "opacity-50 scale-95" : ""}`}
                         style={{
-                          gridArea: plot.gridArea,
-                          backgroundColor: plot.status === "fallow" ? "hsl(var(--muted))" : `${plot.color}20`,
+                          gridRow: `${plot.row + 1} / ${plot.row + 1 + plot.rowSpan}`,
+                          gridColumn: `${plot.col + 1} / ${plot.col + 1 + plot.colSpan}`,
+                          backgroundColor: statusBgColors[plot.status],
                         }}
                       >
-                        <p className="text-xs font-bold">{plot.id}</p>
-                        <p className="text-sm font-medium truncate">{plot.name}</p>
+                        <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); openEdit(plot); }}
+                            className="p-1 rounded bg-background/80 hover:bg-background border border-border/50 transition-colors"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDelete(plot.id); }}
+                            className="p-1 rounded bg-background/80 hover:bg-destructive/10 border border-border/50 transition-colors"
+                          >
+                            <Trash2 className="w-3 h-3 text-destructive" />
+                          </button>
+                        </div>
+                        <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-60 transition-opacity">
+                          <GripVertical className="w-3.5 h-3.5" />
+                        </div>
+                        <p className="text-xs font-bold text-muted-foreground">{plot.id}</p>
+                        <p className="text-sm font-semibold truncate">{plot.name}</p>
                         {plot.crop !== "—" && <p className="text-xs text-muted-foreground">{plot.crop}</p>}
-                      </button>
+                        {(plot.rowSpan > 1 || plot.colSpan > 1) && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">{plot.area} acres</p>
+                        )}
+                        <Badge variant="outline" className={`${statusColors[plot.status]} text-[10px] px-1.5 py-0 mt-1 border`}>
+                          {plot.status.replace("-", " ")}
+                        </Badge>
+                      </div>
                     ))}
                   </div>
                 </CardContent>
@@ -94,12 +303,24 @@ const FieldMap = () => {
             </div>
 
             {/* Detail Panel */}
-            <div>
+            <div className="space-y-4">
               {selected ? (
                 <Card>
-                  <CardHeader>
-                    <CardTitle className="text-lg">{selected.name}</CardTitle>
-                    <CardDescription>Plot {selected.id} · {selected.area}</CardDescription>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-lg">{selected.name}</CardTitle>
+                        <CardDescription>Plot {selected.id} · {selected.area} acres</CardDescription>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(selected)}>
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(selected.id)}>
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="flex items-center gap-2">
@@ -107,9 +328,7 @@ const FieldMap = () => {
                       <span className="text-sm font-medium">Crop:</span>
                       <span className="text-sm">{selected.crop}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Badge className={statusColors[selected.status]}>{selected.status.replace("-", " ")}</Badge>
-                    </div>
+                    <Badge className={statusColors[selected.status]}>{selected.status.replace("-", " ")}</Badge>
                     <div className="space-y-3 pt-2">
                       <div>
                         <div className="flex items-center justify-between text-sm mb-1">
@@ -130,21 +349,23 @@ const FieldMap = () => {
                         </div>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm" className="w-full mt-2">View Full History</Button>
+                    <div className="text-xs text-muted-foreground pt-2">
+                      Position: Row {selected.row + 1}, Col {selected.col + 1} · Size: {selected.colSpan}×{selected.rowSpan}
+                    </div>
                   </CardContent>
                 </Card>
               ) : (
                 <Card>
                   <CardContent className="p-8 text-center text-muted-foreground">
                     <MapPin className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                    <p className="text-sm">Select a plot on the map to view its details</p>
+                    <p className="text-sm">Select a plot on the map to view details</p>
+                    <p className="text-xs mt-1">Drag plots to reposition them</p>
                   </CardContent>
                 </Card>
               )}
 
-              {/* Summary */}
-              <Card className="mt-4">
-                <CardHeader>
+              <Card>
+                <CardHeader className="pb-3">
                   <CardTitle className="text-lg">Quick Stats</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
@@ -154,7 +375,7 @@ const FieldMap = () => {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Total Area</span>
-                    <span className="font-medium">60 acres</span>
+                    <span className="font-medium">{totalArea} acres</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Active Crops</span>
@@ -164,12 +385,162 @@ const FieldMap = () => {
                     <span className="text-muted-foreground">Harvest Ready</span>
                     <span className="font-medium">{plots.filter((p) => p.status === "harvest-ready").length}</span>
                   </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Fallow</span>
+                    <span className="font-medium">{plots.filter((p) => p.status === "fallow").length}</span>
+                  </div>
                 </CardContent>
               </Card>
             </div>
           </div>
         </main>
       </div>
+
+      {/* Edit Dialog */}
+      <Dialog open={editDialog} onOpenChange={setEditDialog}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Edit Plot {editForm?.id}</DialogTitle>
+            <DialogDescription>Update the plot details, position, and size on the grid.</DialogDescription>
+          </DialogHeader>
+          {editForm && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Name</Label>
+                  <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Area (acres)</Label>
+                  <Input type="number" value={editForm.area} onChange={(e) => setEditForm({ ...editForm, area: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Crop</Label>
+                  <Select value={editForm.crop} onValueChange={(v) => setEditForm({ ...editForm, crop: v })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {cropOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Status</Label>
+                  <Select value={editForm.status} onValueChange={(v) => setEditForm({ ...editForm, status: v as PlotStatus })}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Soil Moisture: {editForm.soilMoisture}%</Label>
+                <Slider value={[editForm.soilMoisture]} onValueChange={([v]) => setEditForm({ ...editForm, soilMoisture: v })} max={100} step={1} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Temperature: {editForm.temperature}°C</Label>
+                <Slider value={[editForm.temperature]} onValueChange={([v]) => setEditForm({ ...editForm, temperature: v })} max={45} step={1} />
+              </div>
+              <div className="grid grid-cols-4 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Row</Label>
+                  <Input type="number" min={0} max={GRID_ROWS - 1} value={editForm.row} onChange={(e) => setEditForm({ ...editForm, row: +e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Column</Label>
+                  <Input type="number" min={0} max={GRID_COLS - 1} value={editForm.col} onChange={(e) => setEditForm({ ...editForm, col: +e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Width</Label>
+                  <Input type="number" min={1} max={GRID_COLS} value={editForm.colSpan} onChange={(e) => setEditForm({ ...editForm, colSpan: +e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Height</Label>
+                  <Input type="number" min={1} max={GRID_ROWS} value={editForm.rowSpan} onChange={(e) => setEditForm({ ...editForm, rowSpan: +e.target.value })} />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDialog(false)}>Cancel</Button>
+            <Button onClick={handleEdit}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Dialog */}
+      <Dialog open={addDialog} onOpenChange={setAddDialog}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Add New Plot</DialogTitle>
+            <DialogDescription>Create a new field plot and place it on the grid.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Name</Label>
+                <Input placeholder="e.g. River Bend" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Area (acres)</Label>
+                <Input type="number" value={addForm.area} onChange={(e) => setAddForm({ ...addForm, area: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Crop</Label>
+                <Select value={addForm.crop} onValueChange={(v) => setAddForm({ ...addForm, crop: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {cropOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select value={addForm.status} onValueChange={(v) => setAddForm({ ...addForm, status: v as PlotStatus })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {statusOptions.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Soil Moisture: {addForm.soilMoisture}%</Label>
+              <Slider value={[addForm.soilMoisture]} onValueChange={([v]) => setAddForm({ ...addForm, soilMoisture: v })} max={100} step={1} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Temperature: {addForm.temperature}°C</Label>
+              <Slider value={[addForm.temperature]} onValueChange={([v]) => setAddForm({ ...addForm, temperature: v })} max={45} step={1} />
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Row</Label>
+                <Input type="number" min={0} max={GRID_ROWS - 1} value={addForm.row} onChange={(e) => setAddForm({ ...addForm, row: +e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Column</Label>
+                <Input type="number" min={0} max={GRID_COLS - 1} value={addForm.col} onChange={(e) => setAddForm({ ...addForm, col: +e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Width</Label>
+                <Input type="number" min={1} max={GRID_COLS} value={addForm.colSpan} onChange={(e) => setAddForm({ ...addForm, colSpan: +e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Height</Label>
+                <Input type="number" min={1} max={GRID_ROWS} value={addForm.rowSpan} onChange={(e) => setAddForm({ ...addForm, rowSpan: +e.target.value })} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddDialog(false)}>Cancel</Button>
+            <Button onClick={handleAdd}>Add Plot</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
