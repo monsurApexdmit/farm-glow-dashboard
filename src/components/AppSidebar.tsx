@@ -13,6 +13,9 @@ import {
   Leaf,
   Calendar,
   Bug,
+  DollarSign,
+  Map,
+  Bell,
 } from "lucide-react";
 
 const navItems = [
@@ -20,9 +23,12 @@ const navItems = [
   { title: "Crops", url: "/crops", icon: Sprout },
   { title: "Livestock", url: "/livestock", icon: Bug },
   { title: "Inventory", url: "/inventory", icon: Warehouse },
+  { title: "Field Map", url: "/field-map", icon: Map },
   { title: "Schedule", url: "/schedule", icon: Calendar },
   { title: "Workers", url: "/workers", icon: Users },
+  { title: "Finances", url: "/finances", icon: DollarSign },
   { title: "Reports", url: "/reports", icon: BarChart3 },
+  { title: "Notifications", url: "/notifications", icon: Bell },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
 
