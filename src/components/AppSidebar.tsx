@@ -16,12 +16,16 @@ import {
   DollarSign,
   Map,
   Bell,
+  Home,
+  BarChart4,
 } from "lucide-react";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Crops", url: "/crops", icon: Sprout },
   { title: "Livestock", url: "/livestock", icon: Bug },
+  { title: "Livestock Sheds", url: "/livestock-sheds", icon: Home },
+  { title: "Livestock Inventory", url: "/livestock-inventory", icon: BarChart4 },
   { title: "Inventory", url: "/inventory", icon: Warehouse },
   { title: "Field Map", url: "/field-map", icon: Map },
   { title: "Schedule", url: "/schedule", icon: Calendar },

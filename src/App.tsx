@@ -8,6 +8,8 @@ import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Crops from "./pages/Crops";
 import Livestock from "./pages/Livestock";
+import LivestockSheds from "./pages/LivestockSheds";
+import LivestockInventory from "./pages/LivestockInventory";
 import Inventory from "./pages/Inventory";
 import Schedule from "./pages/Schedule";
 import Workers from "./pages/Workers";
@@ -32,6 +34,8 @@ const App = () => (
           <Route path="/signup" element={<SignUp />} />
           <Route path="/crops" element={<Crops />} />
           <Route path="/livestock" element={<Livestock />} />
+          <Route path="/livestock-sheds" element={<LivestockSheds />} />
+          <Route path="/livestock-inventory" element={<LivestockInventory />} />
           <Route path="/inventory" element={<Inventory />} />
           <Route path="/schedule" element={<Schedule />} />
           <Route path="/workers" element={<Workers />} />
