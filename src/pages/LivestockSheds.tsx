@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,12 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Home, Plus, Pencil, Trash2, GripVertical, Move, ZoomIn, ZoomOut, AlertCircle, Droplets, Clock, Heart, Sparkles, Zap, Egg, Leaf } from "lucide-react";
+import { Home, Plus, Pencil, Trash2, GripVertical, AlertCircle, Droplets, Clock, Heart, Sparkles, Zap } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { FarmGridMap } from "@/components/FarmGridMap";
 
 type ShedStatus = "active" | "maintenance" | "inactive";
 type AnimalType = "cow" | "sheep" | "chicken";
@@ -243,12 +243,8 @@ const LivestockSheds = () => {
     date: new Date().toISOString().split("T")[0],
     details: "",
   });
-  const [dragShed, setDragShed] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<{ row: number; col: number } | null>(null);
-  const [zoom, setZoom] = useState(1);
   const [deleteConfirm, setDeleteConfirm] = useState<Shed | null>(null);
   const { toast } = useToast();
-  const gridRef = useRef<HTMLDivElement>(null);
 
   const nextId = () => {
     const existing = sheds.map((s) => s.id);
@@ -293,27 +289,10 @@ const LivestockSheds = () => {
     toast({ title: "Shed removed", description: "The shed has been deleted." });
   };
 
-  // --- Drag & Drop ---
-  const handleDragStart = (e: React.DragEvent, shedId: string) => {
-    setDragShed(shedId);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleCellDragOver = (e: React.DragEvent, row: number, col: number) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOver({ row, col });
-  };
-
-  const handleCellDrop = (e: React.DragEvent, row: number, col: number) => {
-    e.preventDefault();
-    if (!dragShed) return;
-    setSheds((prev) =>
-      prev.map((s) => (s.id === dragShed ? { ...s, row, col } : s))
-    );
-    setSelected((prev) => (prev?.id === dragShed ? { ...prev, row, col } : prev));
-    setDragShed(null);
-    setDragOver(null);
+  // --- Move (from FarmGridMap drag-drop) ---
+  const handleMove = (id: string, row: number, col: number) => {
+    setSheds((prev) => prev.map((s) => (s.id === id ? { ...s, row, col } : s)));
+    setSelected((prev) => (prev?.id === id ? { ...prev, row, col } : prev));
     toast({ title: "Shed moved", description: "Shed position updated on the layout." });
   };
 
@@ -349,16 +328,6 @@ const LivestockSheds = () => {
     toast({ title: "Record added", description: "Daily record has been logged." });
   };
 
-  // Build occupied cell map
-  const occupiedCells = new Set<string>();
-  sheds.forEach((s) => {
-    for (let r = s.row; r < s.row + s.rowSpan; r++) {
-      for (let c = s.col; c < s.col + s.colSpan; c++) {
-        occupiedCells.add(`${r}-${c}`);
-      }
-    }
-  });
-
   // Quick Stats
   const totalSheds = sheds.length;
   const totalAnimals = sheds.reduce((sum, s) => sum + s.totalAnimals, 0);
@@ -393,133 +362,65 @@ const LivestockSheds = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Map Grid */}
             <div className="lg:col-span-2">
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-lg flex items-center gap-2"><Home className="w-5 h-5" /> Farm Layout</CardTitle>
-                      <CardDescription className="flex items-center gap-1 mt-1">
-                        <Move className="w-3.5 h-3.5" /> Drag sheds to reposition · Click to view details
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}>
-                        <ZoomOut className="w-4 h-4" />
-                      </Button>
-                      <span className="text-xs text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.min(1.5, z + 0.1))}>
-                        <ZoomIn className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="overflow-auto">
-                  <div
-                    ref={gridRef}
-                    className="relative"
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
-                      gridTemplateRows: `repeat(${GRID_ROWS}, ${70 * zoom}px)`,
-                      gap: `${3 * zoom}px`,
-                      transform: `scale(${zoom})`,
-                      transformOrigin: "top left",
-                      width: `${100 / zoom}%`,
-                    }}
-                  >
-                    {/* Background empty cells */}
-                    {Array.from({ length: GRID_ROWS * GRID_COLS }).map((_, i) => {
-                      const row = Math.floor(i / GRID_COLS);
-                      const col = i % GRID_COLS;
-                      const isOver = dragOver?.row === row && dragOver?.col === col;
-                      return (
-                        <div
-                          key={`cell-${row}-${col}`}
-                          className={`rounded-md border border-dashed transition-colors ${
-                            isOver ? "border-primary bg-primary/10" : "border-border/40 bg-muted/20"
-                          }`}
-                          style={{ gridRow: row + 1, gridColumn: col + 1 }}
-                          onDragOver={(e) => handleCellDragOver(e, row, col)}
-                          onDragLeave={() => setDragOver(null)}
-                          onDrop={(e) => handleCellDrop(e, row, col)}
-                        />
-                      );
-                    })}
-
-                    {/* Shed tiles */}
-                    {sheds.map((shed) => {
-                      const colors = animalTypeColors[shed.animalType];
-                      const isFull = shed.totalAnimals >= shed.capacity;
-                      return (
-                        <div
-                          key={shed.id}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, shed.id)}
-                          onDragEnd={() => { setDragShed(null); setDragOver(null); }}
-                          onClick={() => setSelected(shed)}
-                          className={`relative rounded-lg border-2 p-3 text-left transition-all cursor-grab active:cursor-grabbing hover:shadow-lg group z-10 flex flex-col ${
-                            selected?.id === shed.id
-                              ? "border-primary ring-2 ring-primary/30 shadow-md"
-                              : "border-border hover:border-primary/40"
-                          } ${dragShed === shed.id ? "opacity-50 scale-95" : ""} ${colors.bg}`}
-                          style={{
-                            gridRow: `${shed.row + 1} / ${shed.row + 1 + shed.rowSpan}`,
-                            gridColumn: `${shed.col + 1} / ${shed.col + 1 + shed.colSpan}`,
-                          }}
+              <FarmGridMap
+                title={<><Home className="w-5 h-5" /> Farm Layout</>}
+                items={sheds}
+                onMove={handleMove}
+                selectedId={selected?.id}
+                gridCols={GRID_COLS}
+                gridRows={GRID_ROWS}
+                renderTile={(shed, isDragging, isSelected) => {
+                  const colors = animalTypeColors[shed.animalType];
+                  const isFull = shed.totalAnimals >= shed.capacity;
+                  return (
+                    <div
+                      onClick={() => setSelected(shed)}
+                      className={`relative rounded-lg border-2 p-3 text-left transition-all cursor-grab active:cursor-grabbing hover:shadow-lg group h-full w-full flex flex-col ${
+                        isSelected
+                          ? "border-primary ring-2 ring-primary/30 shadow-md"
+                          : "border-border hover:border-primary/40"
+                      } ${isDragging ? "opacity-50 scale-95" : ""} ${colors.bg}`}
+                    >
+                      <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); openEdit(shed); }}
+                          className="p-1 rounded bg-background/80 hover:bg-background border border-border/50 transition-colors"
                         >
-                          <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
-                            <button
-                              onClick={(e) => { e.stopPropagation(); openEdit(shed); }}
-                              className="p-1 rounded bg-background/80 hover:bg-background border border-border/50 transition-colors"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setDeleteConfirm(shed); }}
-                              className="p-1 rounded bg-background/80 hover:bg-destructive/10 border border-border/50 transition-colors"
-                            >
-                              <Trash2 className="w-3 h-3 text-destructive" />
-                            </button>
-                          </div>
-                          <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-60 transition-opacity">
-                            <GripVertical className="w-3.5 h-3.5" />
-                          </div>
-
-                          {/* Animal Icon - Centered when large */}
-                          <div className="flex-1 flex items-center justify-center mb-2">
-                            {animalTypeIcons[shed.animalType]}
-                          </div>
-
-                          <p className="text-xs font-bold text-muted-foreground">{shed.id}</p>
-                          <p className="text-sm font-semibold truncate">{shed.name}</p>
-
-                          {/* Capacity Bar */}
-                          <div className="mt-2 space-y-1">
-                            <div className="h-1.5 rounded-full bg-black/10 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all ${
-                                  isFull ? "bg-destructive" : "bg-primary"
-                                }`}
-                                style={{ width: `${Math.min((shed.totalAnimals / shed.capacity) * 100, 100)}%` }}
-                              />
-                            </div>
-                            <p className="text-[10px] font-medium">
-                              <span className={colors.text}>{shed.totalAnimals}/{shed.capacity}</span>
-                            </p>
-                          </div>
-
-                          <Badge
-                            variant="outline"
-                            className={`${statusColors[shed.status]} text-[10px] px-1.5 py-0 mt-1 border w-fit`}
-                          >
-                            {shed.status}
-                          </Badge>
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteConfirm(shed); }}
+                          className="p-1 rounded bg-background/80 hover:bg-destructive/10 border border-border/50 transition-colors"
+                        >
+                          <Trash2 className="w-3 h-3 text-destructive" />
+                        </button>
+                      </div>
+                      <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-60 transition-opacity">
+                        <GripVertical className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1 flex items-center justify-center mb-2">
+                        {animalTypeIcons[shed.animalType]}
+                      </div>
+                      <p className="text-xs font-bold text-muted-foreground">{shed.id}</p>
+                      <p className="text-sm font-semibold truncate">{shed.name}</p>
+                      <div className="mt-2 space-y-1">
+                        <div className="h-1.5 rounded-full bg-black/10 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${isFull ? "bg-destructive" : "bg-primary"}`}
+                            style={{ width: `${Math.min((shed.totalAnimals / shed.capacity) * 100, 100)}%` }}
+                          />
                         </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
+                        <p className="text-[10px] font-medium">
+                          <span className={colors.text}>{shed.totalAnimals}/{shed.capacity}</span>
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={`${statusColors[shed.status]} text-[10px] px-1.5 py-0 mt-1 border w-fit`}>
+                        {shed.status}
+                      </Badge>
+                    </div>
+                  );
+                }}
+              />
             </div>
 
             {/* Detail Panel */}

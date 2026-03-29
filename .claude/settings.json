@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /home/monsur/Documents/farm-glow-dashboard/src/pages/*.tsx)"
+    ]
+  }
+}

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,8 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
-import { Sprout, Droplets, Thermometer, MapPin, Plus, Pencil, Trash2, GripVertical, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { Sprout, Droplets, Thermometer, MapPin, Plus, Pencil, Trash2, GripVertical } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { FarmGridMap } from "@/components/FarmGridMap";
 
 type PlotStatus = "growing" | "harvest-ready" | "fallow" | "planted";
 
@@ -85,11 +86,7 @@ const FieldMap = () => {
   const [addDialog, setAddDialog] = useState(false);
   const [editForm, setEditForm] = useState<FieldPlot | null>(null);
   const [addForm, setAddForm] = useState<Omit<FieldPlot, "id">>(emptyPlot());
-  const [dragPlot, setDragPlot] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState<{ row: number; col: number } | null>(null);
-  const [zoom, setZoom] = useState(1);
   const { toast } = useToast();
-  const gridRef = useRef<HTMLDivElement>(null);
 
   const nextId = () => {
     const letters = "ABCDEFGHIJ";
@@ -136,40 +133,12 @@ const FieldMap = () => {
     toast({ title: "Plot removed", description: "The plot has been deleted from the map." });
   };
 
-  // --- Drag & Drop ---
-  const handleDragStart = (e: React.DragEvent, plotId: string) => {
-    setDragPlot(plotId);
-    e.dataTransfer.effectAllowed = "move";
-  };
-
-  const handleCellDragOver = (e: React.DragEvent, row: number, col: number) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOver({ row, col });
-  };
-
-  const handleCellDrop = (e: React.DragEvent, row: number, col: number) => {
-    e.preventDefault();
-    if (!dragPlot) return;
-    setPlots((prev) =>
-      prev.map((p) => (p.id === dragPlot ? { ...p, row, col } : p))
-    );
-    // Update selected if it was the dragged plot
-    setSelected((prev) => (prev?.id === dragPlot ? { ...prev, row, col } : prev));
-    setDragPlot(null);
-    setDragOver(null);
+  // --- Move (from FarmGridMap drag-drop) ---
+  const handleMove = (id: string, row: number, col: number) => {
+    setPlots((prev) => prev.map((p) => (p.id === id ? { ...p, row, col } : p)));
+    setSelected((prev) => (prev?.id === id ? { ...prev, row, col } : prev));
     toast({ title: "Plot moved", description: "Plot position updated on the map." });
   };
-
-  // Build occupied cell map (for background grid)
-  const occupiedCells = new Set<string>();
-  plots.forEach((p) => {
-    for (let r = p.row; r < p.row + p.rowSpan; r++) {
-      for (let c = p.col; c < p.col + p.colSpan; c++) {
-        occupiedCells.add(`${r}-${c}`);
-      }
-    }
-  });
 
   const totalArea = plots.reduce((s, p) => s + parseFloat(p.area || "0"), 0);
 
@@ -197,109 +166,52 @@ const FieldMap = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Map Grid */}
             <div className="lg:col-span-2">
-              <Card>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-lg flex items-center gap-2"><MapPin className="w-5 h-5" /> Farm Layout</CardTitle>
-                      <CardDescription className="flex items-center gap-1 mt-1">
-                        <Move className="w-3.5 h-3.5" /> Drag plots to reposition · Click to view details
-                      </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.max(0.6, z - 0.1))}>
-                        <ZoomOut className="w-4 h-4" />
-                      </Button>
-                      <span className="text-xs text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom((z) => Math.min(1.5, z + 0.1))}>
-                        <ZoomIn className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="overflow-auto">
+              <FarmGridMap
+                title={<><MapPin className="w-5 h-5" /> Farm Layout</>}
+                items={plots}
+                onMove={handleMove}
+                selectedId={selected?.id}
+                gridCols={GRID_COLS}
+                gridRows={GRID_ROWS}
+                renderTile={(plot, isDragging, isSelected) => (
                   <div
-                    ref={gridRef}
-                    className="relative"
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
-                      gridTemplateRows: `repeat(${GRID_ROWS}, ${70 * zoom}px)`,
-                      gap: `${3 * zoom}px`,
-                      transform: `scale(${zoom})`,
-                      transformOrigin: "top left",
-                      width: `${100 / zoom}%`,
-                    }}
+                    onClick={() => setSelected(plot)}
+                    className={`relative rounded-lg border-2 p-3 text-left transition-all cursor-grab active:cursor-grabbing hover:shadow-lg group h-full w-full ${
+                      isSelected
+                        ? "border-primary ring-2 ring-primary/30 shadow-md"
+                        : "border-border hover:border-primary/40"
+                    } ${isDragging ? "opacity-50 scale-95" : ""}`}
+                    style={{ backgroundColor: statusBgColors[plot.status] }}
                   >
-                    {/* Background empty cells */}
-                    {Array.from({ length: GRID_ROWS * GRID_COLS }).map((_, i) => {
-                      const row = Math.floor(i / GRID_COLS);
-                      const col = i % GRID_COLS;
-                      const isOver = dragOver?.row === row && dragOver?.col === col;
-                      return (
-                        <div
-                          key={`cell-${row}-${col}`}
-                          className={`rounded-md border border-dashed transition-colors ${
-                            isOver ? "border-primary bg-primary/10" : "border-border/40 bg-muted/20"
-                          }`}
-                          style={{ gridRow: row + 1, gridColumn: col + 1 }}
-                          onDragOver={(e) => handleCellDragOver(e, row, col)}
-                          onDragLeave={() => setDragOver(null)}
-                          onDrop={(e) => handleCellDrop(e, row, col)}
-                        />
-                      );
-                    })}
-
-                    {/* Plot tiles */}
-                    {plots.map((plot) => (
-                      <div
-                        key={plot.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, plot.id)}
-                        onDragEnd={() => { setDragPlot(null); setDragOver(null); }}
-                        onClick={() => setSelected(plot)}
-                        className={`relative rounded-lg border-2 p-3 text-left transition-all cursor-grab active:cursor-grabbing hover:shadow-lg group z-10 ${
-                          selected?.id === plot.id
-                            ? "border-primary ring-2 ring-primary/30 shadow-md"
-                            : "border-border hover:border-primary/40"
-                        } ${dragPlot === plot.id ? "opacity-50 scale-95" : ""}`}
-                        style={{
-                          gridRow: `${plot.row + 1} / ${plot.row + 1 + plot.rowSpan}`,
-                          gridColumn: `${plot.col + 1} / ${plot.col + 1 + plot.colSpan}`,
-                          backgroundColor: statusBgColors[plot.status],
-                        }}
+                    <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openEdit(plot); }}
+                        className="p-1 rounded bg-background/80 hover:bg-background border border-border/50 transition-colors"
                       >
-                        <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); openEdit(plot); }}
-                            className="p-1 rounded bg-background/80 hover:bg-background border border-border/50 transition-colors"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(plot.id); }}
-                            className="p-1 rounded bg-background/80 hover:bg-destructive/10 border border-border/50 transition-colors"
-                          >
-                            <Trash2 className="w-3 h-3 text-destructive" />
-                          </button>
-                        </div>
-                        <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-60 transition-opacity">
-                          <GripVertical className="w-3.5 h-3.5" />
-                        </div>
-                        <p className="text-xs font-bold text-muted-foreground">{plot.id}</p>
-                        <p className="text-sm font-semibold truncate">{plot.name}</p>
-                        {plot.crop !== "—" && <p className="text-xs text-muted-foreground">{plot.crop}</p>}
-                        {(plot.rowSpan > 1 || plot.colSpan > 1) && (
-                          <p className="text-[10px] text-muted-foreground mt-0.5">{plot.area} acres</p>
-                        )}
-                        <Badge variant="outline" className={`${statusColors[plot.status]} text-[10px] px-1.5 py-0 mt-1 border`}>
-                          {plot.status.replace("-", " ")}
-                        </Badge>
-                      </div>
-                    ))}
+                        <Pencil className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleDelete(plot.id); }}
+                        className="p-1 rounded bg-background/80 hover:bg-destructive/10 border border-border/50 transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3 text-destructive" />
+                      </button>
+                    </div>
+                    <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-60 transition-opacity">
+                      <GripVertical className="w-3.5 h-3.5" />
+                    </div>
+                    <p className="text-xs font-bold text-muted-foreground">{plot.id}</p>
+                    <p className="text-sm font-semibold truncate">{plot.name}</p>
+                    {plot.crop !== "—" && <p className="text-xs text-muted-foreground">{plot.crop}</p>}
+                    {(plot.rowSpan > 1 || plot.colSpan > 1) && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5">{plot.area} acres</p>
+                    )}
+                    <Badge variant="outline" className={`${statusColors[plot.status]} text-[10px] px-1.5 py-0 mt-1 border`}>
+                      {plot.status.replace("-", " ")}
+                    </Badge>
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              />
             </div>
 
             {/* Detail Panel */}
