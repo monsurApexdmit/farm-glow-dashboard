@@ -18,7 +18,9 @@ import {
   Bell,
   Home,
   BarChart4,
+  LogOut,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
