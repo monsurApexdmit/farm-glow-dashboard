@@ -13,11 +13,11 @@ const SignIn = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const { theme } = useTheme();
+  const navigate = useNavigate();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: implement real auth
-    console.log("Sign in:", { email, password });
+    navigate("/");
   };
 
   return (

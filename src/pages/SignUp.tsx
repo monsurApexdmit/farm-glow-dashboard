@@ -13,6 +13,7 @@ const SignUp = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const navigate = useNavigate();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -20,7 +21,7 @@ const SignUp = () => {
       alert("Passwords do not match");
       return;
     }
-    console.log("Sign up:", { name, email, password });
+    navigate("/signin");
   };
 
   return (
