@@ -16,6 +16,7 @@ export function PageShell({ children }: PageShellProps) {
           {children}
         </main>
       </div>
+      <SupportMessenger />
     </div>
   );
 }
