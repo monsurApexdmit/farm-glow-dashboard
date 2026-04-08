@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/AppSidebar";
+import { SupportMessenger } from "@/components/SupportMessenger";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { StatCard } from "@/components/StatCard";
 import { CropYieldChart, RevenueChart } from "@/components/DashboardCharts";
@@ -64,6 +65,7 @@ const Index = () => {
           </div>
         </main>
       </div>
+      <SupportMessenger />
     </div>
   );
 };
