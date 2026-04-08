@@ -1,5 +1,6 @@
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
+import { SupportMessenger } from "@/components/SupportMessenger";
 
 interface PageShellProps {
   children: React.ReactNode;
@@ -15,6 +16,7 @@ export function PageShell({ children }: PageShellProps) {
           {children}
         </main>
       </div>
+      <SupportMessenger />
     </div>
   );
 }
