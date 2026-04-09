@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AppSidebar } from "@/components/AppSidebar";
+import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -142,9 +142,7 @@ export default function Schedule() {
   const taskDates = tasks.map((t) => t.dueDate);
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <AppSidebar />
-      <main className="flex-1 p-6 overflow-auto">
+    <PageShell>
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-3xl font-display font-bold text-foreground flex items-center gap-2">
@@ -322,7 +320,6 @@ export default function Schedule() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </main>
-    </div>
+    </PageShell>
   );
 }

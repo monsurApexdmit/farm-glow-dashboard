@@ -1,6 +1,4 @@
-import { AppSidebar } from "@/components/AppSidebar";
-import { SupportMessenger } from "@/components/SupportMessenger";
-import { DashboardHeader } from "@/components/DashboardHeader";
+import { PageShell } from "@/components/PageShell";
 import { StatCard } from "@/components/StatCard";
 import { CropYieldChart, RevenueChart } from "@/components/DashboardCharts";
 import { WeatherWidget } from "@/components/WeatherWidget";
@@ -9,11 +7,7 @@ import { Sprout, TrendingUp, Users, Warehouse } from "lucide-react";
 
 const Index = () => {
   return (
-    <div className="flex min-h-screen w-full">
-      <AppSidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <DashboardHeader />
-        <main className="flex-1 p-6 overflow-auto">
+    <PageShell>
           {/* Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard
@@ -63,10 +57,7 @@ const Index = () => {
               <RecentActivity />
             </div>
           </div>
-        </main>
-      </div>
-      <SupportMessenger />
-    </div>
+    </PageShell>
   );
 };
 

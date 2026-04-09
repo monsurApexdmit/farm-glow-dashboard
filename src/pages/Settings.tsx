@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { AppSidebar } from "@/components/AppSidebar";
-import { DashboardHeader } from "@/components/DashboardHeader";
+import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,11 +34,7 @@ const Settings = () => {
   };
 
   return (
-    <div className="flex min-h-screen w-full">
-      <AppSidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <DashboardHeader />
-        <main className="flex-1 p-6 overflow-auto space-y-6">
+    <PageShell>
           <h1 className="text-3xl font-bold font-display">Settings</h1>
 
           {/* Profile */}
@@ -188,9 +183,7 @@ const Settings = () => {
               Save Changes
             </Button>
           </div>
-        </main>
-      </div>
-    </div>
+    </PageShell>
   );
 };
 
