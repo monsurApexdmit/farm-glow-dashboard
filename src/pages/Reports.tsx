@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { AppSidebar } from "@/components/AppSidebar";
-import { DashboardHeader } from "@/components/DashboardHeader";
+import { PageShell } from "@/components/PageShell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
@@ -97,11 +96,7 @@ const Reports = () => {
   };
 
   return (
-    <div className="flex min-h-screen w-full">
-      <AppSidebar />
-      <div className="flex-1 flex flex-col min-w-0">
-        <DashboardHeader />
-        <main className="flex-1 p-6 overflow-auto">
+    <PageShell>
           {/* Summary Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <Card><CardContent className="p-4 flex items-center gap-3"><DollarSign className="w-8 h-8 text-primary" /><div><p className="text-sm text-muted-foreground">Total Revenue</p><p className="text-2xl font-bold">${(totalRevenue / 1000).toFixed(0)}K</p></div></CardContent></Card>
@@ -256,9 +251,7 @@ const Reports = () => {
               </Card>
             </TabsContent>
           </Tabs>
-        </main>
-      </div>
-    </div>
+    </PageShell>
   );
 };
 
