@@ -300,8 +300,6 @@ const FieldMap = () => {
               </Card>
             </div>
           </div>
-        </main>
-      </div>
 
       {/* Edit Dialog */}
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
@@ -448,7 +446,7 @@ const FieldMap = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   );
 };
 
