@@ -593,8 +593,6 @@ const LivestockSheds = () => {
               </Card>
             </div>
           </div>
-        </main>
-      </div>
 
       {/* Edit Dialog */}
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
@@ -873,7 +871,7 @@ const LivestockSheds = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageShell>
   );
 };
 
