@@ -2,7 +2,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "@/context/AuthContext";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
@@ -27,27 +29,121 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/signin" element={<SignIn />} />
-          <Route path="/signup" element={<SignUp />} />
-          <Route path="/crops" element={<Crops />} />
-          <Route path="/livestock" element={<Livestock />} />
-          <Route path="/livestock-sheds" element={<LivestockSheds />} />
-          <Route path="/livestock-inventory" element={<LivestockInventory />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/schedule" element={<Schedule />} />
-          <Route path="/workers" element={<Workers />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/finances" element={<Finances />} />
-          <Route path="/field-map" element={<FieldMap />} />
-          <Route path="/notifications" element={<Notifications />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/signin" element={<SignIn />} />
+            <Route path="/signup" element={<SignUp />} />
+
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Index />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/crops"
+              element={
+                <ProtectedRoute>
+                  <Crops />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/livestock"
+              element={
+                <ProtectedRoute>
+                  <Livestock />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/livestock-sheds"
+              element={
+                <ProtectedRoute>
+                  <LivestockSheds />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/livestock-inventory"
+              element={
+                <ProtectedRoute>
+                  <LivestockInventory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/inventory"
+              element={
+                <ProtectedRoute>
+                  <Inventory />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/schedule"
+              element={
+                <ProtectedRoute>
+                  <Schedule />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/workers"
+              element={
+                <ProtectedRoute>
+                  <Workers />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <Reports />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/finances"
+              element={
+                <ProtectedRoute>
+                  <Finances />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/field-map"
+              element={
+                <ProtectedRoute>
+                  <FieldMap />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <Notifications />
+                </ProtectedRoute>
+              }
+            />
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
