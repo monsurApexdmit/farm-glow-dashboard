@@ -19,11 +19,13 @@ import {
   Home,
   BarChart4,
   LogOut,
+  Trees,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Farms", url: "/farms", icon: Trees },
   { title: "Crops", url: "/crops", icon: Sprout },
   { title: "Livestock", url: "/livestock", icon: Bug },
   { title: "Livestock Sheds", url: "/livestock-sheds", icon: Home },

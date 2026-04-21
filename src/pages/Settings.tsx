@@ -93,6 +93,7 @@ const Settings = () => {
       await apiClient.put(`${API_ENDPOINTS.USERS_ME}`, {
         first_name: profile.first_name,
         last_name: profile.last_name,
+        email: profile.email,
         phone: profile.phone,
       });
       toast({
@@ -138,7 +139,8 @@ const Settings = () => {
       form.reset();
       setTimeout(() => setPasswordSuccess(""), 3000);
     } catch (error: any) {
-      setPasswordError(error.message || "Failed to change password");
+      const errorMessage = error.message || error?.error || "Failed to change password";
+      setPasswordError(errorMessage);
     }
   };
 
@@ -200,10 +202,8 @@ const Settings = () => {
                 id="email"
                 type="email"
                 value={profile.email}
-                disabled
-                className="bg-gray-50"
+                onChange={(e) => setProfile({ ...profile, email: e.target.value })}
               />
-              <p className="text-xs text-gray-500">Email cannot be changed</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="phone">Phone</Label>

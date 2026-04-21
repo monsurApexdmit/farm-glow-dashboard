@@ -1,306 +1,572 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { AppSidebar } from "@/components/AppSidebar";
+import { DashboardHeader } from "@/components/DashboardHeader";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Bug } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Plus, Search, Download, Pencil, Trash2, Loader } from "lucide-react";
 import { toast } from "sonner";
-import { PageShell } from "@/components/PageShell";
-import { PageHeader } from "@/components/PageHeader";
-import { StatCards } from "@/components/StatCards";
-import { SearchFilterBar } from "@/components/SearchFilterBar";
-import { FormModal } from "@/components/FormModal";
-import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
-import { TableActions, StatusSelect, StatusOption } from "@/components/TableActions";
-import { AnimalProfileDrawer, DailyRecord } from "@/components/AnimalProfileDrawer";
+import { livestockTypeService } from "@/services/livestocktype.service";
+import { livestockService } from "@/services/livestock.service";
+import { farmService } from "@/services/farm.service";
+import { shedService } from "@/services/shed.service";
+import { Livestock as BackendLivestock, Farm, LivestockShed } from "@/types/common";
 
-export type AnimalType = "cattle" | "poultry" | "sheep" | "goat" | "pig" | "horse" | "other";
-export type HealthStatus = "healthy" | "sick" | "treatment" | "quarantine";
+export type LivestockStatus = "active" | "inactive" | "sold" | "deceased";
 
-export interface Animal {
+export interface Livestock {
   id: string;
   name: string;
-  type: AnimalType;
   breed: string;
-  tagId: string;
-  dateOfBirth: string;
-  weight: string;
-  healthStatus: HealthStatus;
-  location: string;
-  notes: string;
+  tag_number: string;
+  date_of_birth: string;
+  weight: number;
+  gender: string;
+  status: LivestockStatus;
+  farm_id: string;
+  shed_id: string;
+  livestock_type_id: number;
+  farmName?: string;
+  shedName?: string;
 }
 
-const typeLabels: Record<AnimalType, string> = {
-  cattle: "Cattle", poultry: "Poultry", sheep: "Sheep",
-  goat: "Goat", pig: "Pig", horse: "Horse", other: "Other",
+const statusConfig: Record<LivestockStatus, { label: string; className: string }> = {
+  active: { label: "Active", className: "bg-green-100 text-green-800 border-green-300" },
+  inactive: { label: "Inactive", className: "bg-yellow-100 text-yellow-800 border-yellow-300" },
+  sold: { label: "Sold", className: "bg-orange-100 text-orange-800 border-orange-300" },
+  deceased: { label: "Deceased", className: "bg-red-100 text-red-800 border-red-300" },
 };
 
-const healthOptions: StatusOption[] = [
-  { value: "healthy",    label: "Healthy",      className: "bg-primary/15 text-primary border-primary/30" },
-  { value: "sick",       label: "Sick",         className: "bg-destructive/15 text-destructive border-destructive/30" },
-  { value: "treatment",  label: "In Treatment", className: "bg-accent/15 text-accent border-accent/30" },
-  { value: "quarantine", label: "Quarantine",   className: "bg-chart-brown/15 text-chart-brown border-chart-brown/30" },
-];
+interface LivestockType {
+  id: number;
+  name: string;
+}
 
-const animalTypeFilterOptions = [
-  { value: "all", label: "All Types" },
-  ...Object.entries(typeLabels).map(([v, l]) => ({ value: v, label: l })),
-];
+const genders = ["male", "female"];
 
-const initialAnimals: Animal[] = [
-  { id: "1", name: "Bessie",  type: "cattle",  breed: "Holstein",         tagId: "COW-001", dateOfBirth: "2022-03-15", weight: "680 kg", healthStatus: "healthy",    location: "Barn A - Pen 1",  notes: "Dairy cow, high yield" },
-  { id: "2", name: "Duke",    type: "horse",   breed: "Quarter Horse",    tagId: "HRS-001", dateOfBirth: "2020-06-10", weight: "520 kg", healthStatus: "healthy",    location: "Stable B",        notes: "Working horse" },
-  { id: "3", name: "Woolly",  type: "sheep",   breed: "Merino",           tagId: "SHP-012", dateOfBirth: "2023-01-20", weight: "75 kg",  healthStatus: "treatment",  location: "Pasture C",       notes: "Shearing due next month" },
-  { id: "4", name: "Clucky",  type: "poultry", breed: "Rhode Island Red", tagId: "CHK-045", dateOfBirth: "2024-09-01", weight: "3.2 kg", healthStatus: "healthy",    location: "Coop 2",          notes: "Laying hen, 5 eggs/week avg" },
-  { id: "5", name: "Porky",   type: "pig",     breed: "Berkshire",        tagId: "PIG-007", dateOfBirth: "2025-02-14", weight: "110 kg", healthStatus: "sick",       location: "Barn C - Pen 3",  notes: "Reduced appetite, vet scheduled" },
-  { id: "6", name: "Nanny",   type: "goat",    breed: "Boer",             tagId: "GOT-003", dateOfBirth: "2023-11-05", weight: "65 kg",  healthStatus: "quarantine", location: "Isolation Pen",   notes: "New arrival, observation period" },
-];
-
-const emptyForm: Omit<Animal, "id"> = {
-  name: "", type: "cattle", breed: "", tagId: "", dateOfBirth: "",
-  weight: "", healthStatus: "healthy", location: "", notes: "",
+const emptyForm: Omit<Livestock, "id"> = {
+  name: "",
+  breed: "",
+  tag_number: "",
+  date_of_birth: "",
+  weight: 0,
+  gender: "male",
+  status: "active",
+  farm_id: "",
+  shed_id: "",
+  livestock_type_id: 0,
 };
+
+const mapBackendToLivestock = (l: BackendLivestock): Livestock => ({
+  id: l.id,
+  name: l.name,
+  breed: l.breed,
+  tag_number: l.tag_number,
+  date_of_birth: l.date_of_birth ? (l.date_of_birth.split('T')[0] || l.date_of_birth.split(' ')[0]) : "",
+  weight: l.weight,
+  gender: l.gender || "male",
+  status: l.status as LivestockStatus,
+  farm_id: l.farm_id,
+  shed_id: l.shed_id || "",
+  livestock_type_id: l.livestock_type_id || 0,
+});
+
+const mapLivestockToBackend = (l: Omit<Livestock, "id">): Partial<BackendLivestock> => ({
+  name: l.name,
+  breed: l.breed,
+  tag_number: l.tag_number,
+  date_of_birth: l.date_of_birth,
+  weight: l.weight,
+  gender: l.gender,
+  status: l.status,
+  farm_id: l.farm_id,
+  shed_id: l.shed_id || undefined,
+  livestock_type_id: l.livestock_type_id,
+});
 
 const Livestock = () => {
-  const [animals, setAnimals] = useState<Animal[]>(initialAnimals);
-  // Daily records keyed by animal id
-  const [recordsMap, setRecordsMap] = useState<Record<string, DailyRecord[]>>({});
-
+  const [livestock, setLivestock] = useState<Livestock[]>([]);
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [sheds, setSheds] = useState<LivestockShed[]>([]);
+  const [livestockTypes, setLivestockTypes] = useState<LivestockType[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [healthFilter, setHealthFilter] = useState("all");
-
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [editingAnimal, setEditingAnimal] = useState<Animal | null>(null);
-  const [deletingAnimal, setDeletingAnimal] = useState<Animal | null>(null);
-  const [form, setForm] = useState<Omit<Animal, "id">>(emptyForm);
+  const [editingItem, setEditingItem] = useState<Livestock | null>(null);
+  const [deletingItem, setDeletingItem] = useState<Livestock | null>(null);
+  const [form, setForm] = useState<Omit<Livestock, "id">>(emptyForm);
 
-  // Profile drawer
-  const [profileAnimal, setProfileAnimal] = useState<Animal | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const filtered = useMemo(() => animals.filter((a) => {
-    const matchSearch =
-      a.name.toLowerCase().includes(search.toLowerCase()) ||
-      a.breed.toLowerCase().includes(search.toLowerCase()) ||
-      a.tagId.toLowerCase().includes(search.toLowerCase()) ||
-      a.location.toLowerCase().includes(search.toLowerCase());
-    return matchSearch &&
-      (typeFilter === "all" || a.type === typeFilter) &&
-      (healthFilter === "all" || a.healthStatus === healthFilter);
-  }), [animals, search, typeFilter, healthFilter]);
-
-  const counts = {
-    total:      animals.length,
-    healthy:    animals.filter((a) => a.healthStatus === "healthy").length,
-    sick:       animals.filter((a) => a.healthStatus === "sick").length,
-    treatment:  animals.filter((a) => a.healthStatus === "treatment").length,
-    quarantine: animals.filter((a) => a.healthStatus === "quarantine").length,
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [livestockData, farmsData, typesData, shedsData] = await Promise.all([
+        livestockService.getLivestock(),
+        farmService.getFarms(),
+        livestockTypeService.getTypes(),
+        shedService.getSheds(),
+      ]);
+      const farmsArr = Array.isArray(farmsData) ? farmsData : [];
+      const shedsArr = Array.isArray(shedsData) ? shedsData : [];
+      const formattedLivestock = (Array.isArray(livestockData) ? livestockData : []).map(l => {
+        const farm = farmsArr.find(f => f.id === l.farm_id);
+        const shed = shedsArr.find(s => s.id === l.shed_id);
+        return {
+          ...mapBackendToLivestock(l),
+          farmName: farm?.name,
+          shedName: shed?.name,
+        };
+      });
+      setLivestock(formattedLivestock);
+      setFarms(farmsArr);
+      setSheds(shedsArr);
+      setLivestockTypes(Array.isArray(typesData) ? typesData : []);
+    } catch (error: any) {
+      console.error("Failed to load data:", error);
+      toast.error(error.message || "Failed to load livestock");
+      setLoading(false);
+      return;
+    }
+    setLoading(false);
   };
 
-  const openAdd = () => { setEditingAnimal(null); setForm(emptyForm); setDialogOpen(true); };
-  const openEdit = (a: Animal) => {
-    setEditingAnimal(a);
-    setForm({ name: a.name, type: a.type, breed: a.breed, tagId: a.tagId, dateOfBirth: a.dateOfBirth, weight: a.weight, healthStatus: a.healthStatus, location: a.location, notes: a.notes });
+  const filtered = useMemo(() => {
+    return livestock.filter((l) => {
+      const matchSearch =
+        l.name.toLowerCase().includes(search.toLowerCase()) ||
+        l.breed.toLowerCase().includes(search.toLowerCase()) ||
+        l.tag_number.toLowerCase().includes(search.toLowerCase());
+      const matchStatus = statusFilter === "all" || l.status === statusFilter;
+      return matchSearch && matchStatus;
+    });
+  }, [livestock, search, statusFilter]);
+
+  const openAdd = () => {
+    setEditingItem(null);
+    setForm(emptyForm);
     setDialogOpen(true);
   };
-  const openDelete = (a: Animal) => { setDeletingAnimal(a); setDeleteDialogOpen(true); };
 
-  const openProfile = (a: Animal) => { setProfileAnimal(a); setDrawerOpen(true); };
-
-  const handleSave = () => {
-    if (!form.name || !form.breed || !form.tagId) { toast.error("Please fill in all required fields"); return; }
-    if (editingAnimal) {
-      setAnimals((prev) => prev.map((a) => a.id === editingAnimal.id ? { ...a, ...form } : a));
-      // Keep profile in sync if drawer is open for this animal
-      if (profileAnimal?.id === editingAnimal.id) setProfileAnimal({ ...editingAnimal, ...form });
-      toast.success(`${form.name} updated successfully`);
-    } else {
-      const newAnimal: Animal = { ...form, id: Date.now().toString() };
-      setAnimals((prev) => [...prev, newAnimal]);
-      toast.success(`${form.name} added successfully`);
-      // Auto-open profile for the new animal
-      setProfileAnimal(newAnimal);
-      setDrawerOpen(true);
-    }
-    setDialogOpen(false);
+  const openEdit = (item: Livestock) => {
+    setEditingItem(item);
+    setForm({
+      name: item.name,
+      breed: item.breed,
+      tag_number: item.tag_number,
+      date_of_birth: item.date_of_birth,
+      weight: item.weight,
+      gender: item.gender,
+      status: item.status,
+      farm_id: item.farm_id,
+      shed_id: item.shed_id || "",
+      livestock_type_id: item.livestock_type_id,
+    });
+    setDialogOpen(true);
   };
 
-  const handleDelete = () => {
-    if (deletingAnimal) {
-      setAnimals((prev) => prev.filter((a) => a.id !== deletingAnimal.id));
-      if (profileAnimal?.id === deletingAnimal.id) setDrawerOpen(false);
-      toast.success(`${deletingAnimal.name} removed`);
-    }
-    setDeleteDialogOpen(false); setDeletingAnimal(null);
+  const openDelete = (item: Livestock) => {
+    setDeletingItem(item);
+    setDeleteDialogOpen(true);
   };
 
-  const handleAddRecord = (animalId: string, rec: Omit<DailyRecord, "id" | "createdAt">) => {
-    const newRecord: DailyRecord = {
-      ...rec,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    };
-    setRecordsMap((prev) => ({
-      ...prev,
-      [animalId]: [...(prev[animalId] ?? []), newRecord],
-    }));
-    toast.success("Daily record saved");
+  const handleSave = async () => {
+    if (!form.name || !form.breed || !form.tag_number || !form.farm_id || !form.date_of_birth || !form.livestock_type_id || !form.gender) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+    try {
+      const backendData = mapLivestockToBackend(form);
+      backendData.gender = form.gender;
+      backendData.livestock_type_id = form.livestock_type_id;
+      
+      if (editingItem) {
+        await livestockService.updateLivestock(editingItem.id, backendData);
+        toast.success(`${form.name} updated successfully`);
+      } else {
+        await livestockService.createLivestock(backendData);
+        toast.success(`${form.name} added successfully`);
+      }
+      setDialogOpen(false);
+      await loadData();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save livestock");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (deletingItem) {
+      try {
+        await livestockService.deleteLivestock(deletingItem.id);
+        toast.success(`${deletingItem.name} deleted`);
+        await loadData();
+      } catch (error: any) {
+        toast.error(error.message || "Failed to delete livestock");
+      }
+    }
+    setDeleteDialogOpen(false);
+    setDeletingItem(null);
   };
 
   const exportCSV = () => {
-    const headers = ["Name", "Type", "Breed", "Tag ID", "Date of Birth", "Weight", "Health Status", "Location", "Notes"];
-    const rows = filtered.map((a) => [a.name, typeLabels[a.type], a.breed, a.tagId, a.dateOfBirth, a.weight, a.healthStatus, a.location, a.notes]);
+    const headers = ["Name", "Type", "Breed", "Tag Number", "Birth Date", "Weight", "Gender", "Status", "Farm"];
+    const rows = filtered.map((l) => [l.name, l.livestock_type_id, l.breed, l.tag_number, l.date_of_birth, l.weight, l.gender, l.status, l.farmName || ""]);
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${v}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "livestock_export.csv"; a.click();
-    URL.revokeObjectURL(url); toast.success("Exported to CSV");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "livestock_export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Exported to CSV");
   };
 
+  const updateStatus = async (item: Livestock, newStatus: LivestockStatus) => {
+    try {
+      const backendData = mapLivestockToBackend({ ...item, status: newStatus });
+      backendData.gender = item.gender;
+      backendData.livestock_type_id = item.livestock_type_id;
+      await livestockService.updateLivestock(item.id, backendData);
+      toast.success(`${item.name} status updated to ${statusConfig[newStatus].label}`);
+      await loadData();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update status");
+    }
+  };
+
+  const counts = {
+    total: livestock.length,
+    active: livestock.filter((l) => l.status === "active").length,
+    inactive: livestock.filter((l) => l.status === "inactive").length,
+    sold: livestock.filter((l) => l.status === "sold").length,
+    deceased: livestock.filter((l) => l.status === "deceased").length,
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen w-full">
+        <AppSidebar />
+        <div className="flex-1 flex items-center justify-center">
+          <Loader className="w-8 h-8 animate-spin" />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <PageShell>
-      <PageHeader
-        title="Livestock Management"
-        description="Track and manage all your animals and herds"
-        addLabel="Add Animal"
-        onAdd={openAdd}
-        onExport={exportCSV}
-      />
+    <div className="flex min-h-screen w-full">
+      <AppSidebar />
+      <div className="flex-1 flex flex-col min-w-0">
+        <DashboardHeader />
+        <main className="flex-1 p-6 overflow-auto space-y-6">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">Livestock Management</h1>
+              <p className="text-muted-foreground text-sm">Track and manage all livestock across your farm</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={exportCSV}>
+                <Download className="w-4 h-4 mr-1" /> Export
+              </Button>
+              <Button size="sm" onClick={openAdd}>
+                <Plus className="w-4 h-4 mr-1" /> Add Livestock
+              </Button>
+            </div>
+          </div>
 
-      <StatCards stats={[
-        { label: "Total Animals", value: counts.total,      color: "text-foreground" },
-        { label: "Healthy",       value: counts.healthy,    color: "text-primary" },
-        { label: "Sick",          value: counts.sick,       color: "text-destructive" },
-        { label: "In Treatment",  value: counts.treatment,  color: "text-accent" },
-        { label: "Quarantine",    value: counts.quarantine, color: "text-chart-brown" },
-      ]} />
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { label: "Total", value: counts.total, color: "text-foreground" },
+              { label: "Active", value: counts.active, color: "text-green-600" },
+              { label: "Inactive", value: counts.inactive, color: "text-yellow-600" },
+              { label: "Sold", value: counts.sold, color: "text-orange-600" },
+              { label: "Deceased", value: counts.deceased, color: "text-red-600" },
+            ].map((s) => (
+              <Card key={s.label}>
+                <CardContent className="p-4 text-center">
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                  <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
-      <SearchFilterBar
-        search={search} onSearch={setSearch} searchPlaceholder="Search animals..."
-        filters={[
-          { value: typeFilter,   onChange: setTypeFilter,   placeholder: "Type",   options: animalTypeFilterOptions },
-          { value: healthFilter, onChange: setHealthFilter, placeholder: "Health",
-            options: [{ value: "all", label: "All Health" }, ...healthOptions.map((o) => ({ value: o.value, label: o.label }))] },
-        ]}
-      />
-
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Animal</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Tag ID</TableHead>
-                <TableHead>DOB</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Health</TableHead>
-                <TableHead>Location</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12 text-muted-foreground">
-                    <Bug className="w-10 h-10 mx-auto mb-2 opacity-30" />No animals found
-                  </TableCell>
-                </TableRow>
-              ) : filtered.map((animal) => (
-                <TableRow key={animal.id}>
-                  <TableCell>
-                    <button
-                      className="text-left hover:underline focus:outline-none"
-                      onClick={() => openProfile(animal)}
-                    >
-                      <p className="font-medium text-primary">{animal.name}</p>
-                      <p className="text-xs text-muted-foreground">{animal.breed}</p>
-                    </button>
-                  </TableCell>
-                  <TableCell className="text-sm">{typeLabels[animal.type]}</TableCell>
-                  <TableCell className="text-sm font-mono">{animal.tagId}</TableCell>
-                  <TableCell className="text-sm">{animal.dateOfBirth}</TableCell>
-                  <TableCell className="text-sm">{animal.weight}</TableCell>
-                  <TableCell>
-                    <StatusSelect
-                      value={animal.healthStatus}
-                      options={healthOptions}
-                      onChange={(v) => {
-                        setAnimals((prev) => prev.map((a) => a.id === animal.id ? { ...a, healthStatus: v as HealthStatus } : a));
-                        if (profileAnimal?.id === animal.id) setProfileAnimal((p) => p ? { ...p, healthStatus: v as HealthStatus } : p);
-                        toast.success(`${animal.name} status updated`);
-                      }}
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-[200px]">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search livestock..."
+                      className="pl-9"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
                     />
-                  </TableCell>
-                  <TableCell className="text-sm">{animal.location}</TableCell>
-                  <TableCell className="text-right">
-                    <TableActions onEdit={() => openEdit(animal)} onDelete={() => openDelete(animal)} />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                  </div>
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="sold">Sold</SelectItem>
+                    <SelectItem value="deceased">Deceased</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Add / Edit modal */}
-      <FormModal
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        title={editingAnimal ? "Edit Animal" : "Add New Animal"}
-        description={editingAnimal ? "Update animal details below." : "Fill in the details for the new animal."}
-        onSave={handleSave}
-        saveLabel={editingAnimal ? "Save Changes" : "Add Animal"}
-      >
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5"><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Bessie" /></div>
-          <div className="space-y-1.5"><Label>Type</Label>
-            <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as AnimalType })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{animalTypeFilterOptions.filter(o => o.value !== "all").map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-            </Select>
+          <Card>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Breed</TableHead>
+                    <TableHead>Tag Number</TableHead>
+                    <TableHead>Birth Date</TableHead>
+                    <TableHead>Weight</TableHead>
+                    <TableHead>Gender</TableHead>
+                    <TableHead>Farm</TableHead>
+                    <TableHead>Shed</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
+                        No livestock found
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filtered.map((item) => {
+                      const status = (item.status as LivestockStatus) || "active";
+                      const config = statusConfig[status] || statusConfig.active;
+                      const typeName = livestockTypes.find(t => t.id === item.livestock_type_id)?.name || "Unknown";
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">{item.name}</TableCell>
+                          <TableCell className="text-sm">{typeName}</TableCell>
+                          <TableCell className="text-sm">{item.breed}</TableCell>
+                          <TableCell className="text-sm">{item.tag_number}</TableCell>
+                          <TableCell className="text-sm">{item.date_of_birth}</TableCell>
+                          <TableCell className="text-sm">{item.weight} kg</TableCell>
+                          <TableCell className="text-sm capitalize">{item.gender}</TableCell>
+                          <TableCell className="text-sm">{item.farmName}</TableCell>
+                          <TableCell className="text-sm">{item.shedName || <span className="text-muted-foreground">—</span>}</TableCell>
+                          <TableCell>
+                            <Select
+                              value={status}
+                              onValueChange={(v) => updateStatus(item, v as LivestockStatus)}
+                            >
+                              <SelectTrigger className="h-7 w-[120px] border-0 p-0">
+                                <Badge variant="outline" className={config.className}>
+                                  {config.label}
+                                </Badge>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="active">Active</SelectItem>
+                                <SelectItem value="inactive">Inactive</SelectItem>
+                                <SelectItem value="sold">Sold</SelectItem>
+                                <SelectItem value="deceased">Deceased</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(item)}>
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive" onClick={() => openDelete(item)}>
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingItem ? "Edit Livestock" : "Add New Livestock"}</DialogTitle>
+            <DialogDescription>{editingItem ? "Update livestock details below." : "Fill in the details for the new livestock."}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="name">Name *</Label>
+                <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Bessie" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="type">Type *</Label>
+                <Select value={String(form.livestock_type_id)} onValueChange={(value) => setForm({ ...form, livestock_type_id: Number(value) })}>
+                  <SelectTrigger id="type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {livestockTypes.map((t) => (
+                      <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="breed">Breed *</Label>
+                <Input id="breed" value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} placeholder="e.g. Holstein" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tag">Tag Number *</Label>
+                <Input id="tag" value={form.tag_number} onChange={(e) => setForm({ ...form, tag_number: e.target.value })} placeholder="e.g. FARM-001" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="birth">Birth Date *</Label>
+                <Input id="birth" type="date" value={form.date_of_birth} onChange={(e) => setForm({ ...form, date_of_birth: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="weight">Weight (kg) *</Label>
+                <Input id="weight" type="number" value={form.weight} onChange={(e) => setForm({ ...form, weight: Number(e.target.value) })} placeholder="e.g. 500" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="gender">Gender *</Label>
+                <Select value={form.gender} onValueChange={(value) => setForm({ ...form, gender: value })}>
+                  <SelectTrigger id="gender">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {genders.map((g) => (
+                      <SelectItem key={g} value={g}>{g}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="farm">Farm *</Label>
+                <Select value={form.farm_id} onValueChange={(value) => setForm({ ...form, farm_id: value, shed_id: "" })}>
+                  <SelectTrigger id="farm">
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {farms.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as LivestockStatus })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="sold">Sold</SelectItem>
+                    <SelectItem value="deceased">Deceased</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="shed">Shed</Label>
+              <Select
+                value={form.shed_id || "none"}
+                onValueChange={(value) => setForm({ ...form, shed_id: value === "none" ? "" : value })}
+              >
+                <SelectTrigger id="shed">
+                  <SelectValue placeholder="Select shed (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Shed</SelectItem>
+                  {sheds
+                    .filter(s => !form.farm_id || s.farm_id === form.farm_id)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5"><Label>Breed *</Label><Input value={form.breed} onChange={(e) => setForm({ ...form, breed: e.target.value })} placeholder="e.g. Holstein" /></div>
-          <div className="space-y-1.5"><Label>Tag ID *</Label><Input value={form.tagId} onChange={(e) => setForm({ ...form, tagId: e.target.value })} placeholder="e.g. COW-001" /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5"><Label>Date of Birth</Label><Input type="date" value={form.dateOfBirth} onChange={(e) => setForm({ ...form, dateOfBirth: e.target.value })} /></div>
-          <div className="space-y-1.5"><Label>Weight</Label><Input value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} placeholder="e.g. 680 kg" /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5"><Label>Health Status</Label>
-            <Select value={form.healthStatus} onValueChange={(v) => setForm({ ...form, healthStatus: v as HealthStatus })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{healthOptions.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5"><Label>Location</Label><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="e.g. Barn A - Pen 1" /></div>
-        </div>
-        <div className="space-y-1.5"><Label>Notes</Label><Input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} placeholder="Additional notes..." /></div>
-      </FormModal>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleSave}>{editingItem ? "Save Changes" : "Add Livestock"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <DeleteConfirmDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        onConfirm={handleDelete}
-        title={`Remove ${deletingAnimal?.name}?`}
-        description="This action cannot be undone. This animal record will be permanently removed."
-      />
-
-      {/* Animal profile + daily records drawer */}
-      <AnimalProfileDrawer
-        animal={profileAnimal}
-        records={profileAnimal ? (recordsMap[profileAnimal.id] ?? []) : []}
-        open={drawerOpen}
-        onOpenChange={setDrawerOpen}
-        onAddRecord={handleAddRecord}
-      />
-    </PageShell>
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deletingItem?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>This action cannot be undone. This livestock record will be permanently removed.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 };
 

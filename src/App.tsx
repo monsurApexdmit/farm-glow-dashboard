@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+import Farms from "./pages/Farms";
 import Crops from "./pages/Crops";
 import Livestock from "./pages/Livestock";
 import LivestockSheds from "./pages/LivestockSheds";
@@ -40,6 +41,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Index />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/farms"
+              element={
+                <ProtectedRoute>
+                  <Farms />
                 </ProtectedRoute>
               }
             />

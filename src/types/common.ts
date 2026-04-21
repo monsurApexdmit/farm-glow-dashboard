@@ -10,6 +10,7 @@ export interface Farm extends BaseEntity {
   name: string;
   location: string;
   total_area: number;
+  unit?: string;
   farm_type: string;
   soil_type: string;
   climate_zone: string;
@@ -22,7 +23,9 @@ export interface Field extends BaseEntity {
   farm_id: string;
   name: string;
   area: number;
+  unit?: string;
   soil_type: string;
+  status?: string;
   latitude: number;
   longitude: number;
   deleted_at?: string;
@@ -36,6 +39,9 @@ export interface Crop extends BaseEntity {
   expected_harvest_date: string;
   quantity_planted: number;
   target_yield: number;
+  estimated_yield?: number;
+  actual_yield?: number;
+  yield_unit?: string;
   status: 'planning' | 'growing' | 'harvested';
   deleted_at?: string;
 }
@@ -44,12 +50,14 @@ export interface Livestock extends BaseEntity {
   farm_id: string;
   shed_id?: string;
   name: string;
-  type: string;
+  type?: string;
   breed: string;
   tag_number: string;
-  birth_date: string;
+  date_of_birth: string;
   weight: number;
+  gender?: string;
   status: 'healthy' | 'sick' | 'quarantined' | 'deceased';
+  livestock_type_id?: number;
   deleted_at?: string;
 }
 

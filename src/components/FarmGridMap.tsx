@@ -82,7 +82,7 @@ export function FarmGridMap<T extends GridItem>({
           style={{
             display: "grid",
             gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
-            gridTemplateRows: `repeat(${gridRows}, ${70 * zoom}px)`,
+            gridTemplateRows: `repeat(${gridRows}, ${140 * zoom}px)`,
             gap: `${3 * zoom}px`,
             transform: `scale(${zoom})`,
             transformOrigin: "top left",

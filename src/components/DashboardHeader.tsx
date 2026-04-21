@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Moon, Sun, Bell, Search, User, Settings, LogOut, CreditCard } from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
+import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
 import {
   Sheet,
@@ -35,7 +36,19 @@ const profileMenuItems = [
 export function DashboardHeader() {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
+
+  const getInitials = () => {
+    if (!user) return "U";
+    return `${user.first_name?.[0] || ""}${user.last_name?.[0] || ""}`.toUpperCase() || "U";
+  };
+
+  const handleLogout = async () => {
+    setProfileOpen(false);
+    await logout();
+    navigate("/signin");
+  };
 
   return (
     <>
@@ -117,7 +130,7 @@ export function DashboardHeader() {
             onClick={() => setProfileOpen(true)}
             className="w-9 h-9 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
           >
-            JD
+            {getInitials()}
           </button>
         </div>
       </header>
@@ -127,10 +140,10 @@ export function DashboardHeader() {
         <SheetContent className="w-80 sm:w-96">
           <SheetHeader className="items-center text-center pb-4">
             <Avatar className="w-20 h-20 mb-2">
-              <AvatarFallback className="bg-primary text-primary-foreground text-2xl font-bold">JD</AvatarFallback>
+              <AvatarFallback className="bg-primary text-primary-foreground text-2xl font-bold">{getInitials()}</AvatarFallback>
             </Avatar>
-            <SheetTitle>John Farmer</SheetTitle>
-            <SheetDescription>john@agrifarm.com</SheetDescription>
+            <SheetTitle>{user ? `${user.first_name} ${user.last_name}` : "User"}</SheetTitle>
+            <SheetDescription>{user?.email}</SheetDescription>
           </SheetHeader>
 
           <Separator />
@@ -155,10 +168,7 @@ export function DashboardHeader() {
 
           <div className="py-4">
             <button
-              onClick={() => {
-                setProfileOpen(false);
-                navigate("/sign-in");
-              }}
+              onClick={handleLogout}
               className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm hover:bg-destructive/10 transition-colors text-destructive"
             >
               <LogOut className="w-4 h-4" />

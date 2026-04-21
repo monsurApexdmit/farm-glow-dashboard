@@ -41,7 +41,18 @@ class ApiClient {
       (error: AxiosError<any>) => {
         const originalRequest = error.config as any;
 
-        // Handle 401 - Token expired
+        // If the refresh-token endpoint itself returns 401, bail out immediately
+        if (
+          error.response?.status === 401 &&
+          originalRequest?.url?.includes('refresh-token')
+        ) {
+          this.isRefreshing = false;
+          this.processQueue(error, null);
+          this.clearAndRedirect();
+          return Promise.reject(this.formatError(error));
+        }
+
+        // Handle 401 on any other endpoint - attempt token refresh once
         if (error.response?.status === 401 && !originalRequest._retry) {
           if (this.isRefreshing) {
             return new Promise((resolve, reject) => {
@@ -67,8 +78,7 @@ class ApiClient {
             .catch((err) => {
               this.processQueue(err, null);
               this.isRefreshing = false;
-              localStorage.removeItem('auth_token');
-              window.location.href = '/signin';
+              this.clearAndRedirect();
               return Promise.reject(err);
             });
         }
@@ -92,6 +102,14 @@ class ApiClient {
     this.failedQueue = [];
   }
 
+  private clearAndRedirect() {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('user');
+    if (!window.location.pathname.includes('/signin')) {
+      window.location.href = '/signin';
+    }
+  }
+
   private async refreshToken(): Promise<string> {
     try {
       const response = await this.client.post('/api/v1/auth/refresh-token');
@@ -109,6 +127,7 @@ class ApiClient {
       status: error.response?.status || 500,
       message:
         error.response?.data?.message ||
+        error.response?.data?.error ||
         error.message ||
         'An error occurred',
       errors: error.response?.data?.errors,
