@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,35 +6,21 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { AlertCircle, Pencil } from "lucide-react";
+import { AlertCircle, Pencil, RefreshCw } from "lucide-react";
 import { LivestockTypeCard, LivestockTypeData, AnimalDetail } from "@/components/LivestockTypeCard";
 import { FormModal } from "@/components/FormModal";
 import { PageShell } from "@/components/PageShell";
 import { StatCards } from "@/components/StatCards";
 import { SearchFilterBar } from "@/components/SearchFilterBar";
+import { livestockService } from "@/services/livestock.service";
+import { useToast } from "@/hooks/use-toast";
 
-type AnimalType = "cow" | "sheep" | "chicken";
 type HealthStatus = "healthy" | "sick" | "treatment" | "quarantine";
 
-const initialLivestock: LivestockTypeData[] = [
-  {
-    type: "cow", label: "Dairy Cows", icon: "🐄",
-    healthyCount: 30, sickCount: 5, treatmentCount: 4, quarantineCount: 1,
-    capacityUsed: 70, totalCapacity: 80, avgAge: "4.2 years", avgWeight: "680 kg", productionRate: "420L/day",
-  },
-  {
-    type: "sheep", label: "Wool Sheep", icon: "🐑",
-    healthyCount: 32, sickCount: 6, treatmentCount: 8, quarantineCount: 4,
-    capacityUsed: 50, totalCapacity: 60, avgAge: "3.1 years", avgWeight: "72 kg", productionRate: "12kg wool/year",
-  },
-  {
-    type: "chicken", label: "Laying Hens", icon: "🐔",
-    healthyCount: 160, sickCount: 20, treatmentCount: 15, quarantineCount: 5,
-    capacityUsed: 200, totalCapacity: 240, avgAge: "2.3 years", avgWeight: "3.1 kg", productionRate: "170 eggs/day",
-  },
-];
-
-const animalIcons: Record<string, string> = { cow: "🐄", sheep: "🐑", chicken: "🐔" };
+const animalIcons: Record<string, string> = {
+  cow: "🐄", cattle: "🐄", sheep: "🐑", chicken: "🐔",
+  pig: "🐷", goat: "🐐", duck: "🦆", horse: "🐴",
+};
 
 const statusStyle: Record<HealthStatus, {
   badge: string; label: string; panel: string;
@@ -53,23 +39,57 @@ const healthOptions: { value: HealthStatus; label: string }[] = [
   { value: "quarantine", label: "Quarantine" },
 ];
 
-// Each AnimalDetail stored so edits persist per session
 interface AnimalRecord extends AnimalDetail {
+  backendId: number;
   notes: string;
+  breed?: string;
+  gender?: string;
 }
 
 const LivestockInventory = () => {
-  const [livestock] = useState<LivestockTypeData[]>(initialLivestock);
+  const { toast } = useToast();
+  const [livestock, setLivestock] = useState<LivestockTypeData[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [selectedType, setSelectedType] = useState<AnimalType | "all">("all");
+  const [selectedType, setSelectedType] = useState<string>("all");
 
-  // Selected animal for the view dialog
   const [viewAnimal, setViewAnimal] = useState<AnimalRecord | null>(null);
-  // Edit modal state
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<AnimalRecord | null>(null);
-  // Local overrides: key = `${type}-${id}`
-  const [overrides, setOverrides] = useState<Record<string, Partial<AnimalRecord>>>({});
+  const [saving, setSaving] = useState(false);
+
+  // Raw animal data keyed by backendId for edit lookups
+  const [animalMap, setAnimalMap] = useState<Record<number, any>>({});
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const summary = await livestockService.getInventorySummary();
+      // Build animalMap for detail lookups
+      const map: Record<number, any> = {};
+      for (const group of summary) {
+        for (const a of (group.animals ?? [])) {
+          map[a.id] = { ...a, groupType: group.type, groupLabel: group.label, icon: group.icon };
+        }
+      }
+      setAnimalMap(map);
+      setLivestock(summary);
+    } catch {
+      toast({ title: "Failed to load livestock inventory", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadData(); }, []);
+
+  const typeOptions = useMemo(() => {
+    const types = [...new Set(livestock.map(l => l.type))];
+    return [
+      { value: "all", label: "All Types" },
+      ...types.map(t => ({ value: t, label: livestock.find(l => l.type === t)?.label ?? t })),
+    ];
+  }, [livestock]);
 
   const filtered = useMemo(() =>
     livestock.filter((item) => {
@@ -90,14 +110,16 @@ const LivestockInventory = () => {
     totalUsed:       livestock.reduce((s, i) => s + i.capacityUsed, 0),
   };
 
-  // Merge base animal with any saved overrides
-  const resolveAnimal = (base: AnimalDetail): AnimalRecord => {
-    const key = `${base.type}-${base.id}`;
-    return { ...base, notes: "", ...overrides[key] } as AnimalRecord;
-  };
-
   const handleAnimalClick = (base: AnimalDetail) => {
-    setViewAnimal(resolveAnimal(base));
+    const raw = animalMap[(base as any).backendId ?? base.id];
+    const record: AnimalRecord = {
+      ...base,
+      backendId: raw?.id ?? base.id,
+      notes: raw?.notes ?? "",
+      breed: raw?.breed,
+      gender: raw?.gender,
+    };
+    setViewAnimal(record);
   };
 
   const openEdit = () => {
@@ -106,22 +128,42 @@ const LivestockInventory = () => {
     setEditOpen(true);
   };
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editForm) return;
-    const key = `${editForm.type}-${editForm.id}`;
-    setOverrides((prev) => ({ ...prev, [key]: editForm }));
-    setViewAnimal(editForm);
-    setEditOpen(false);
+    setSaving(true);
+    try {
+      await livestockService.logHealth(String(editForm.backendId), {
+        health_status: editForm.status,
+        observations: editForm.notes || undefined,
+        weight: parseFloat(editForm.weight) || undefined,
+        weight_unit: "kg",
+      });
+      toast({ title: "Health record saved", description: `${editForm.animalTypeName} #${editForm.backendId} updated.` });
+      setViewAnimal(editForm);
+      setEditOpen(false);
+      await loadData();
+    } catch {
+      toast({ title: "Failed to save health record", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const animalStatus = viewAnimal ? statusStyle[viewAnimal.status] : null;
+  const icon = viewAnimal ? (animalIcons[viewAnimal.type] ?? "🐾") : "";
 
   return (
     <PageShell>
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold font-display">Livestock Inventory</h1>
-        <p className="text-muted-foreground">Visual stock overview by animal type</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold font-display">Livestock Inventory</h1>
+          <p className="text-muted-foreground">Visual stock overview by animal type</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
       </div>
 
       {/* Overview Stats */}
@@ -133,7 +175,7 @@ const LivestockInventory = () => {
           { label: "Sick",          value: stats.totalSick,       color: "text-red-600" },
           { label: "Treatment",     value: stats.totalTreatment,  color: "text-orange-600" },
           { label: "Quarantine",    value: stats.totalQuarantine, color: "text-yellow-600" },
-          { label: "Capacity",      value: `${Math.round((stats.totalUsed / stats.totalCapacity) * 100)}%` },
+          { label: "Capacity",      value: stats.totalCapacity > 0 ? `${Math.round((stats.totalUsed / stats.totalCapacity) * 100)}%` : "—" },
         ]}
       />
 
@@ -145,26 +187,34 @@ const LivestockInventory = () => {
         filters={[
           {
             value: selectedType,
-            onChange: (v) => setSelectedType(v as AnimalType | "all"),
+            onChange: setSelectedType,
             placeholder: "Type",
-            options: [
-              { value: "all", label: "All Types" },
-              { value: "cow", label: "Cows" },
-              { value: "sheep", label: "Sheep" },
-              { value: "chicken", label: "Chickens" },
-            ],
+            options: typeOptions,
           },
         ]}
       />
 
-      {/* Livestock Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filtered.map((item) => (
-          <LivestockTypeCard key={item.type} item={item} onAnimalClick={handleAnimalClick} />
-        ))}
-      </div>
+      {/* Loading */}
+      {loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map(i => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-6 h-64 bg-muted/30 rounded-lg" />
+            </Card>
+          ))}
+        </div>
+      )}
 
-      {filtered.length === 0 && (
+      {/* Livestock Grid */}
+      {!loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filtered.map((item) => (
+            <LivestockTypeCard key={item.type} item={item} onAnimalClick={handleAnimalClick} />
+          ))}
+        </div>
+      )}
+
+      {!loading && filtered.length === 0 && (
         <Card>
           <CardContent className="p-12 text-center text-muted-foreground">
             <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-40" />
@@ -173,14 +223,14 @@ const LivestockInventory = () => {
         </Card>
       )}
 
-      {/* ── View Detail Dialog ─────────────────────────────────────── */}
+      {/* View Detail Dialog */}
       <Dialog open={!!viewAnimal && !editOpen} onOpenChange={(open) => !open && setViewAnimal(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <div className="flex items-center gap-3">
-              <span className="text-4xl">{viewAnimal ? animalIcons[viewAnimal.type] : ""}</span>
+              <span className="text-4xl">{icon}</span>
               <div>
-                <DialogTitle>{viewAnimal?.animalTypeName} #{viewAnimal?.id}</DialogTitle>
+                <DialogTitle>{viewAnimal?.animalTypeName} #{viewAnimal?.backendId}</DialogTitle>
                 <DialogDescription>Individual animal details</DialogDescription>
               </div>
             </div>
@@ -188,17 +238,15 @@ const LivestockInventory = () => {
 
           {viewAnimal && animalStatus && (
             <div className="space-y-4 py-2">
-              {/* Status badge + condition */}
               <div className="flex items-center gap-3">
                 <Badge className={`text-sm px-3 py-1 ${animalStatus.badge}`}>{animalStatus.label}</Badge>
                 <span className="text-sm text-muted-foreground">{viewAnimal.condition}</span>
               </div>
 
-              {/* Detail grid */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 rounded-lg bg-muted/40">
-                  <p className="text-xs text-muted-foreground">Animal ID</p>
-                  <p className="text-lg font-semibold">#{viewAnimal.id}</p>
+                  <p className="text-xs text-muted-foreground">Tag / ID</p>
+                  <p className="text-lg font-semibold">#{viewAnimal.backendId}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-muted/40">
                   <p className="text-xs text-muted-foreground">Age</p>
@@ -212,9 +260,20 @@ const LivestockInventory = () => {
                   <p className="text-xs text-muted-foreground">Last Checkup</p>
                   <p className="text-sm font-semibold">{viewAnimal.lastCheckup}</p>
                 </div>
+                {viewAnimal.breed && (
+                  <div className="p-3 rounded-lg bg-muted/40">
+                    <p className="text-xs text-muted-foreground">Breed</p>
+                    <p className="text-sm font-semibold">{viewAnimal.breed}</p>
+                  </div>
+                )}
+                {viewAnimal.gender && (
+                  <div className="p-3 rounded-lg bg-muted/40">
+                    <p className="text-xs text-muted-foreground">Gender</p>
+                    <p className="text-sm font-semibold capitalize">{viewAnimal.gender}</p>
+                  </div>
+                )}
               </div>
 
-              {/* Health panel */}
               <div className={`p-3 rounded-lg border ${animalStatus.panel}`}>
                 <div className="flex items-start gap-2">
                   <span className="text-xl">{animalStatus.icon}</span>
@@ -225,7 +284,6 @@ const LivestockInventory = () => {
                 </div>
               </div>
 
-              {/* Notes (if any) */}
               {viewAnimal.notes && (
                 <div className="p-3 rounded-lg bg-muted/40">
                   <p className="text-xs text-muted-foreground mb-1">Notes</p>
@@ -233,7 +291,6 @@ const LivestockInventory = () => {
                 </div>
               )}
 
-              {/* Actions */}
               <div className="flex gap-2 pt-2 border-t">
                 <Button variant="outline" size="sm" className="flex-1" onClick={openEdit}>
                   <Pencil className="w-3.5 h-3.5 mr-1" /> Edit Info
@@ -244,15 +301,15 @@ const LivestockInventory = () => {
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit Modal (uses FormModal) ────────────────────────────── */}
+      {/* Edit Modal */}
       {editForm && (
         <FormModal
           open={editOpen}
           onOpenChange={(open) => { setEditOpen(open); }}
-          title={`Edit ${editForm.animalTypeName} #${editForm.id}`}
+          title={`Edit ${editForm.animalTypeName} #${editForm.backendId}`}
           description="Update this animal's health status and notes."
           onSave={handleSaveEdit}
-          saveLabel="Save Changes"
+          saveLabel={saving ? "Saving..." : "Save Changes"}
         >
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -260,7 +317,7 @@ const LivestockInventory = () => {
               <Input value={editForm.age} onChange={(e) => setEditForm({ ...editForm, age: e.target.value })} />
             </div>
             <div className="space-y-1.5">
-              <Label>Weight</Label>
+              <Label>Weight (kg)</Label>
               <Input value={editForm.weight} onChange={(e) => setEditForm({ ...editForm, weight: e.target.value })} />
             </div>
           </div>

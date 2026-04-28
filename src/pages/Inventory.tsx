@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Warehouse, Package, AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Warehouse, Package, AlertTriangle, RefreshCw, TrendingDown, TrendingUp, History } from "lucide-react";
 import { PageShell } from "@/components/PageShell";
 import { PageHeader } from "@/components/PageHeader";
 import { StatCards } from "@/components/StatCards";
@@ -12,31 +15,12 @@ import { SearchFilterBar } from "@/components/SearchFilterBar";
 import { FormModal } from "@/components/FormModal";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { TableActions } from "@/components/TableActions";
+import { useToast } from "@/hooks/use-toast";
+import { inventoryService, BackendInventoryItem, BackendCategory, BackendSupplier } from "@/services/inventory.service";
+import { farmService } from "@/services/farm.service";
+import { Farm } from "@/types/common";
 
-type ItemCategory = "Seeds" | "Fertilizer" | "Equipment" | "Feed" | "Medicine" | "Tools" | "Other";
 type StockStatus = "in-stock" | "low-stock" | "out-of-stock";
-
-interface InventoryItem {
-  id: string;
-  name: string;
-  category: ItemCategory;
-  quantity: number;
-  unit: string;
-  minStock: number;
-  costPerUnit: number;
-  supplier: string;
-  location: string;
-  lastRestocked: string;
-}
-
-const categories: ItemCategory[] = ["Seeds", "Fertilizer", "Equipment", "Feed", "Medicine", "Tools", "Other"];
-const units = ["kg", "liters", "bags", "pieces", "boxes", "tons", "bottles"];
-
-const getStockStatus = (item: InventoryItem): StockStatus => {
-  if (item.quantity === 0) return "out-of-stock";
-  if (item.quantity <= item.minStock) return "low-stock";
-  return "in-stock";
-};
 
 const stockBadgeMap: Record<StockStatus, { label: string; className: string }> = {
   "in-stock":     { label: "In Stock",     className: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
@@ -44,87 +28,265 @@ const stockBadgeMap: Record<StockStatus, { label: string; className: string }> =
   "out-of-stock": { label: "Out of Stock", className: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
 };
 
-const initialItems: InventoryItem[] = [
-  { id: "1", name: "Corn Seeds",          category: "Seeds",      quantity: 50,  unit: "bags",    minStock: 10,  costPerUnit: 25,   supplier: "AgriSupply Co", location: "Warehouse A",  lastRestocked: "2026-01-15" },
-  { id: "2", name: "NPK Fertilizer",      category: "Fertilizer", quantity: 8,   unit: "bags",    minStock: 15,  costPerUnit: 40,   supplier: "FarmChem Ltd",  location: "Warehouse B",  lastRestocked: "2026-01-20" },
-  { id: "3", name: "Tractor Fuel",        category: "Other",      quantity: 200, unit: "liters",  minStock: 50,  costPerUnit: 1.5,  supplier: "PetroFarm",     location: "Fuel Depot",   lastRestocked: "2026-02-01" },
-  { id: "4", name: "Cattle Feed",         category: "Feed",       quantity: 0,   unit: "kg",      minStock: 100, costPerUnit: 0.8,  supplier: "FeedMaster",    location: "Barn Storage", lastRestocked: "2026-01-10" },
-  { id: "5", name: "Veterinary Vaccine",  category: "Medicine",   quantity: 30,  unit: "bottles", minStock: 10,  costPerUnit: 15,   supplier: "VetPharm",      location: "Cold Storage", lastRestocked: "2026-02-05" },
-  { id: "6", name: "Irrigation Hose",     category: "Equipment",  quantity: 5,   unit: "pieces",  minStock: 3,   costPerUnit: 120,  supplier: "IrriTech",      location: "Warehouse A",  lastRestocked: "2025-12-20" },
-];
+const units = ["kg", "liters", "bags", "pieces", "boxes", "tons", "bottles", "sets", "rolls", "packs"];
 
-const emptyForm = (): Omit<InventoryItem, "id"> => ({
-  name: "", category: "Seeds", quantity: 0, unit: "kg", minStock: 0,
-  costPerUnit: 0, supplier: "", location: "", lastRestocked: new Date().toISOString().split("T")[0],
+function getStockStatus(item: BackendInventoryItem): StockStatus {
+  const qty = Number(item.quantity);
+  const min = Number(item.min_quantity ?? item.reorder_point?.reorder_point ?? 0);
+  if (qty === 0) return "out-of-stock";
+  if (qty <= min) return "low-stock";
+  return "in-stock";
+}
+
+function fmt(n: number) {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+const emptyForm = () => ({
+  name: "", sku: "", category_id: "", supplier_id: "", unit: "kg",
+  quantity: 0, min_quantity: 0, max_quantity: 0, cost_per_unit: 0,
+  location: "", description: "", expiry_date: "", farm_id: "",
 });
 
 export default function Inventory() {
-  const [items, setItems] = useState<InventoryItem[]>(initialItems);
-  const [search, setSearch] = useState("");
+  const { toast } = useToast();
+
+  // Data
+  const [items, setItems]       = useState<BackendInventoryItem[]>([]);
+  const [categories, setCategories] = useState<BackendCategory[]>([]);
+  const [suppliers, setSuppliers]   = useState<BackendSupplier[]>([]);
+  const [farms, setFarms]           = useState<Farm[]>([]);
+  const [totalValue, setTotalValue] = useState(0);
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+
+  // Filters
+  const [search, setSearch]               = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
-  const [filterStock, setFilterStock] = useState("all");
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
-  const [form, setForm] = useState<Omit<InventoryItem, "id">>(emptyForm());
+  const [filterStock, setFilterStock]       = useState("all");
 
-  const filtered = items.filter((item) => {
-    const matchSearch = item.name.toLowerCase().includes(search.toLowerCase()) || item.supplier.toLowerCase().includes(search.toLowerCase());
-    return matchSearch &&
-      (filterCategory === "all" || item.category === filterCategory) &&
-      (filterStock === "all" || getStockStatus(item) === filterStock);
-  });
+  // Dialogs
+  const [dialogOpen, setDialogOpen]   = useState(false);
+  const [editingId, setEditingId]     = useState<string | null>(null);
+  const [form, setForm]               = useState(emptyForm());
+  const [deleteId, setDeleteId]       = useState<string | null>(null);
 
-  const openAdd = () => { setEditingItem(null); setForm(emptyForm()); setDialogOpen(true); };
-  const openEdit = (item: InventoryItem) => { setEditingItem(item); const { id, ...rest } = item; setForm(rest); setDialogOpen(true); };
+  // Use / Restock quick dialog
+  const [txDialog, setTxDialog]   = useState<{ type: "use" | "restock"; item: BackendInventoryItem } | null>(null);
+  const [txQty, setTxQty]         = useState("");
+  const [txNotes, setTxNotes]     = useState("");
+  const [txCost, setTxCost]       = useState("");
 
-  const handleSave = () => {
-    if (!form.name.trim()) return;
-    if (editingItem) {
-      setItems((prev) => prev.map((i) => i.id === editingItem.id ? { ...i, ...form } : i));
-    } else {
-      setItems((prev) => [...prev, { ...form, id: crypto.randomUUID() }]);
+  // Transaction history dialog
+  const [historyItem, setHistoryItem]     = useState<BackendInventoryItem | null>(null);
+  const [historyData, setHistoryData]     = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [itemsData, catsData, supsData, farmsData, value] = await Promise.all([
+        inventoryService.getItems(),
+        inventoryService.getCategories(),
+        inventoryService.getSuppliers(),
+        farmService.getFarms(),
+        inventoryService.getTotalValue(),
+      ]);
+      setItems(itemsData);
+      setCategories(catsData);
+      setSuppliers(supsData);
+      setFarms(Array.isArray(farmsData) ? farmsData : []);
+      setTotalValue(value);
+    } catch {
+      toast({ title: "Failed to load inventory", variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
-    setDialogOpen(false);
   };
 
-  const handleDelete = () => {
-    if (deleteId) setItems((prev) => prev.filter((i) => i.id !== deleteId));
-    setDeleteId(null);
+  useEffect(() => { loadData(); }, []);
+
+  const filtered = useMemo(() =>
+    items.filter((item) => {
+      const catName = item.category?.name ?? "";
+      const supName = item.supplier?.name ?? "";
+      const matchSearch = item.name.toLowerCase().includes(search.toLowerCase()) ||
+        supName.toLowerCase().includes(search.toLowerCase()) ||
+        item.sku.toLowerCase().includes(search.toLowerCase());
+      const matchCat   = filterCategory === "all" || item.category_id === filterCategory;
+      const matchStock = filterStock === "all" || getStockStatus(item) === filterStock;
+      return matchSearch && matchCat && matchStock;
+    }), [items, search, filterCategory, filterStock]);
+
+  const stats = useMemo(() => ({
+    total:      items.length,
+    lowStock:   items.filter(i => getStockStatus(i) === "low-stock").length,
+    outOfStock: items.filter(i => getStockStatus(i) === "out-of-stock").length,
+  }), [items]);
+
+  // ── Add / Edit ─────────────────────────────────────────────────
+  const openAdd = () => {
+    setEditingId(null);
+    setForm({ ...emptyForm(), farm_id: farms[0]?.id ?? "" });
+    setDialogOpen(true);
   };
 
+  const openEdit = (item: BackendInventoryItem) => {
+    setEditingId(item.id);
+    setForm({
+      name: item.name, sku: item.sku,
+      category_id: item.category_id, supplier_id: item.supplier_id ?? "",
+      unit: item.unit, quantity: Number(item.quantity),
+      min_quantity: Number(item.min_quantity ?? 0),
+      max_quantity: Number(item.max_quantity ?? 0),
+      cost_per_unit: Number(item.cost_per_unit),
+      location: item.location ?? "", description: item.description ?? "",
+      expiry_date: item.expiry_date?.split("T")[0] ?? "",
+      farm_id: item.farm_id,
+    });
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.category_id || !form.farm_id) {
+      toast({ title: "Name, category and farm are required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload: any = {
+        ...form,
+        supplier_id: form.supplier_id || undefined,
+        expiry_date: form.expiry_date || undefined,
+        description: form.description || undefined,
+      };
+      if (editingId) {
+        await inventoryService.updateItem(editingId, payload);
+        toast({ title: "Item updated" });
+      } else {
+        await inventoryService.createItem(payload);
+        toast({ title: "Item added" });
+      }
+      setDialogOpen(false);
+      await loadData();
+    } catch (err: any) {
+      toast({ title: "Failed to save item", description: err?.response?.data?.message ?? err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    try {
+      await inventoryService.deleteItem(deleteId);
+      toast({ title: "Item deleted" });
+      await loadData();
+    } catch {
+      toast({ title: "Failed to delete item", variant: "destructive" });
+    } finally {
+      setDeleteId(null);
+    }
+  };
+
+  // ── Use / Restock ──────────────────────────────────────────────
+  const openTx = (type: "use" | "restock", item: BackendInventoryItem) => {
+    setTxDialog({ type, item });
+    setTxQty(""); setTxNotes(""); setTxCost(String(item.cost_per_unit));
+  };
+
+  const handleTx = async () => {
+    if (!txDialog || !txQty || Number(txQty) <= 0) {
+      toast({ title: "Enter a valid quantity", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      if (txDialog.type === "use") {
+        await inventoryService.recordUse(txDialog.item.id, Number(txQty), txNotes || undefined);
+        toast({ title: "Usage recorded" });
+      } else {
+        await inventoryService.recordRestock(txDialog.item.id, Number(txQty), txCost ? Number(txCost) : undefined, txNotes || undefined);
+        toast({ title: "Restock recorded" });
+      }
+      setTxDialog(null);
+      await loadData();
+    } catch (err: any) {
+      toast({ title: "Failed to record transaction", description: err?.response?.data?.error ?? err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Transaction History ────────────────────────────────────────
+  const openHistory = async (item: BackendInventoryItem) => {
+    setHistoryItem(item);
+    setHistoryLoading(true);
+    try {
+      const txs = await inventoryService.getItemTransactions(item.id);
+      setHistoryData(txs);
+    } catch {
+      setHistoryData([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // ── CSV Export ─────────────────────────────────────────────────
   const exportCSV = () => {
-    const headers = ["Name", "Category", "Quantity", "Unit", "Min Stock", "Cost/Unit", "Supplier", "Location", "Last Restocked", "Status"];
-    const rows = filtered.map((i) => [i.name, i.category, i.quantity, i.unit, i.minStock, i.costPerUnit, i.supplier, i.location, i.lastRestocked, getStockStatus(i)]);
-    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "inventory.csv"; a.click();
-    URL.revokeObjectURL(url);
+    const headers = ["Name", "SKU", "Category", "Quantity", "Unit", "Min Stock", "Cost/Unit", "Total Value", "Supplier", "Location", "Status"];
+    const rows = filtered.map(i => [
+      i.name, i.sku, i.category?.name ?? "", i.quantity, i.unit,
+      i.min_quantity ?? "", i.cost_per_unit, i.total_value ?? "",
+      i.supplier?.name ?? "", i.location ?? "", getStockStatus(i),
+    ]);
+    const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = "inventory.csv"; a.click();
   };
 
-  const totalValue    = items.reduce((sum, i) => sum + i.quantity * i.costPerUnit, 0);
-  const lowStockCount = items.filter((i) => getStockStatus(i) === "low-stock").length;
-  const outOfStock    = items.filter((i) => getStockStatus(i) === "out-of-stock").length;
+  const categoryOptions = [
+    { value: "all", label: "All Categories" },
+    ...categories.map(c => ({ value: c.id, label: `${c.icon ?? ""} ${c.name}`.trim() })),
+  ];
+
+  const txTypeColors: Record<string, string> = {
+    use: "text-red-600", restock: "text-green-600",
+    adjustment: "text-blue-600", loss: "text-orange-600",
+  };
 
   return (
     <PageShell>
-      <PageHeader title="Inventory Management" description="Track farm supplies, equipment, and stock levels"
-        extra={<Warehouse className="w-7 h-7 text-primary" />} addLabel="Add Item" onAdd={openAdd} onExport={exportCSV} />
+      <PageHeader
+        title="Inventory Management"
+        description="Track farm supplies, equipment, and stock levels"
+        extra={
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
+              <RefreshCw className={`w-4 h-4 mr-1 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+            <Warehouse className="w-7 h-7 text-primary" />
+          </div>
+        }
+        addLabel="Add Item"
+        onAdd={openAdd}
+        onExport={exportCSV}
+      />
 
       <StatCards columns="grid-cols-2 md:grid-cols-4" stats={[
-        { label: "Total Items",   value: items.length },
-        { label: "Total Value",   value: `$${totalValue.toLocaleString()}` },
-        { label: "Low Stock",     value: lowStockCount, color: "text-yellow-600", icon: <AlertTriangle className="w-4 h-4 text-yellow-500" /> },
-        { label: "Out of Stock",  value: outOfStock,    color: "text-destructive" },
+        { label: "Total Items",   value: stats.total },
+        { label: "Total Value",   value: `$${fmt(totalValue)}` },
+        { label: "Low Stock",     value: stats.lowStock,   color: "text-yellow-600", icon: <AlertTriangle className="w-4 h-4 text-yellow-500" /> },
+        { label: "Out of Stock",  value: stats.outOfStock, color: "text-destructive" },
       ]} />
 
       <SearchFilterBar
-        search={search} onSearch={setSearch} searchPlaceholder="Search items..."
+        search={search} onSearch={setSearch} searchPlaceholder="Search by name, SKU or supplier..."
         filters={[
-          { value: filterCategory, onChange: setFilterCategory, placeholder: "Category", width: "w-[160px]",
-            options: [{ value: "all", label: "All Categories" }, ...categories.map((c) => ({ value: c, label: c }))] },
-          { value: filterStock, onChange: setFilterStock, placeholder: "Stock", width: "w-[160px]",
+          { value: filterCategory, onChange: setFilterCategory, placeholder: "Category", width: "w-[180px]", options: categoryOptions },
+          { value: filterStock,    onChange: setFilterStock,    placeholder: "Stock",    width: "w-[160px]",
             options: [{ value: "all", label: "All Status" }, { value: "in-stock", label: "In Stock" }, { value: "low-stock", label: "Low Stock" }, { value: "out-of-stock", label: "Out of Stock" }] },
         ]}
       />
@@ -135,33 +297,80 @@ export default function Inventory() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>SKU</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Quantity</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Cost/Unit</TableHead>
+                <TableHead>Total Value</TableHead>
                 <TableHead>Supplier</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
-                <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                  <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />No items found
-                </TableCell></TableRow>
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 10 }).map((_, j) => (
+                      <TableCell key={j}><div className="h-4 bg-muted animate-pulse rounded" /></TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : filtered.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
+                    <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    No items found
+                  </TableCell>
+                </TableRow>
               ) : filtered.map((item) => {
                 const status = getStockStatus(item);
-                const badge = stockBadgeMap[status];
+                const badge  = stockBadgeMap[status];
+                const expiringSoon = item.expiry_date && new Date(item.expiry_date) < new Date(Date.now() + 30 * 864e5);
                 return (
                   <TableRow key={item.id}>
-                    <TableCell className="font-medium">{item.name}</TableCell>
-                    <TableCell>{item.category}</TableCell>
-                    <TableCell>{item.quantity} {item.unit}</TableCell>
-                    <TableCell><Badge variant="outline" className={badge.className}>{badge.label}</Badge></TableCell>
-                    <TableCell>${item.costPerUnit}</TableCell>
-                    <TableCell>{item.supplier}</TableCell>
-                    <TableCell>{item.location}</TableCell>
-                    <TableCell className="text-right"><TableActions onEdit={() => openEdit(item)} onDelete={() => setDeleteId(item.id)} /></TableCell>
+                    <TableCell className="font-medium">
+                      <div>{item.name}</div>
+                      {expiringSoon && (
+                        <span className="text-xs text-orange-500">⚠ Expires {item.expiry_date?.split("T")[0]}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{item.sku}</TableCell>
+                    <TableCell>
+                      <span className="text-sm">
+                        {item.category?.icon} {item.category?.name ?? "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className={Number(item.quantity) === 0 ? "text-destructive font-semibold" : ""}>
+                        {item.quantity} {item.unit}
+                      </span>
+                      {item.min_quantity != null && (
+                        <div className="text-xs text-muted-foreground">min: {item.min_quantity}</div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={badge.className}>{badge.label}</Badge>
+                    </TableCell>
+                    <TableCell>${fmt(Number(item.cost_per_unit))}</TableCell>
+                    <TableCell>${fmt(Number(item.total_value ?? 0))}</TableCell>
+                    <TableCell className="text-sm">{item.supplier?.name ?? "—"}</TableCell>
+                    <TableCell className="text-sm">{item.location ?? "—"}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600 hover:text-green-700" title="Restock" onClick={() => openTx("restock", item)}>
+                          <TrendingUp className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-orange-500 hover:text-orange-600" title="Record Use" onClick={() => openTx("use", item)}>
+                          <TrendingDown className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-500 hover:text-blue-600" title="History" onClick={() => openHistory(item)}>
+                          <History className="w-3.5 h-3.5" />
+                        </Button>
+                        <TableActions onEdit={() => openEdit(item)} onDelete={() => setDeleteId(item.id)} />
+                      </div>
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -170,37 +379,187 @@ export default function Inventory() {
         </CardContent>
       </Card>
 
-      <FormModal open={dialogOpen} onOpenChange={setDialogOpen} title={editingItem ? "Edit Item" : "Add New Item"}
-        onSave={handleSave} saveLabel={editingItem ? "Save Changes" : "Add Item"}>
-        <div className="grid grid-cols-2 gap-4">
-          <div><label className="text-sm font-medium">Name</label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-          <div><label className="text-sm font-medium">Category</label>
-            <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v as ItemCategory })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+      {/* ── Add / Edit Modal ──────────────────────────────────── */}
+      <FormModal
+        open={dialogOpen} onOpenChange={setDialogOpen}
+        title={editingId ? "Edit Item" : "Add New Item"}
+        onSave={handleSave}
+        saveLabel={saving ? "Saving..." : editingId ? "Save Changes" : "Add Item"}
+      >
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Name *</Label>
+            <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} placeholder="e.g. Corn Seeds" />
+          </div>
+          <div className="space-y-1.5">
+            <Label>SKU *</Label>
+            <Input value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} placeholder="e.g. SEED-001" />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Category *</Label>
+            <Select value={form.category_id} onValueChange={v => setForm({ ...form, category_id: v })}>
+              <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
+              <SelectContent>
+                {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.icon} {c.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Supplier</Label>
+            <Select value={form.supplier_id || "none"} onValueChange={v => setForm({ ...form, supplier_id: v === "none" ? "" : v })}>
+              <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No Supplier</SelectItem>
+                {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
             </Select>
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div><label className="text-sm font-medium">Quantity</label><Input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: +e.target.value })} /></div>
-          <div><label className="text-sm font-medium">Unit</label>
-            <Select value={form.unit} onValueChange={(v) => setForm({ ...form, unit: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{units.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Farm *</Label>
+            <Select value={form.farm_id} onValueChange={v => setForm({ ...form, farm_id: v })}>
+              <SelectTrigger><SelectValue placeholder="Select farm" /></SelectTrigger>
+              <SelectContent>
+                {farms.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+              </SelectContent>
             </Select>
           </div>
-          <div><label className="text-sm font-medium">Min Stock</label><Input type="number" value={form.minStock} onChange={(e) => setForm({ ...form, minStock: +e.target.value })} /></div>
+          <div className="space-y-1.5">
+            <Label>Unit *</Label>
+            <Select value={form.unit} onValueChange={v => setForm({ ...form, unit: v })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div><label className="text-sm font-medium">Cost per Unit ($)</label><Input type="number" step="0.01" value={form.costPerUnit} onChange={(e) => setForm({ ...form, costPerUnit: +e.target.value })} /></div>
-          <div><label className="text-sm font-medium">Last Restocked</label><Input type="date" value={form.lastRestocked} onChange={(e) => setForm({ ...form, lastRestocked: e.target.value })} /></div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="space-y-1.5">
+            <Label>Quantity</Label>
+            <Input type="number" min="0" value={form.quantity} onChange={e => setForm({ ...form, quantity: +e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Min Stock</Label>
+            <Input type="number" min="0" value={form.min_quantity} onChange={e => setForm({ ...form, min_quantity: +e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Max Stock</Label>
+            <Input type="number" min="0" value={form.max_quantity} onChange={e => setForm({ ...form, max_quantity: +e.target.value })} />
+          </div>
         </div>
-        <div><label className="text-sm font-medium">Supplier</label><Input value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} /></div>
-        <div><label className="text-sm font-medium">Location</label><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Cost per Unit ($)</Label>
+            <Input type="number" min="0" step="0.01" value={form.cost_per_unit} onChange={e => setForm({ ...form, cost_per_unit: +e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Expiry Date</Label>
+            <Input type="date" value={form.expiry_date} onChange={e => setForm({ ...form, expiry_date: e.target.value })} />
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Location</Label>
+          <Input value={form.location} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="e.g. Warehouse A" />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Description</Label>
+          <Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="Optional notes..." />
+        </div>
       </FormModal>
 
-      <DeleteConfirmDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}
-        onConfirm={handleDelete} title="Delete Item" description="Are you sure? This action cannot be undone." />
+      {/* ── Use / Restock Dialog ──────────────────────────────── */}
+      <Dialog open={!!txDialog} onOpenChange={open => !open && setTxDialog(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {txDialog?.type === "use"
+                ? <><TrendingDown className="w-4 h-4 text-orange-500" /> Record Usage</>
+                : <><TrendingUp className="w-4 h-4 text-green-600" /> Restock</>}
+            </DialogTitle>
+            <DialogDescription>{txDialog?.item.name} — current: {txDialog?.item.quantity} {txDialog?.item.unit}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label>Quantity ({txDialog?.item.unit})</Label>
+              <Input type="number" min="0.001" step="0.001" value={txQty} onChange={e => setTxQty(e.target.value)} placeholder="0" autoFocus />
+            </div>
+            {txDialog?.type === "restock" && (
+              <div className="space-y-1.5">
+                <Label>Cost per Unit ($)</Label>
+                <Input type="number" min="0" step="0.01" value={txCost} onChange={e => setTxCost(e.target.value)} />
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label>Notes</Label>
+              <Input value={txNotes} onChange={e => setTxNotes(e.target.value)} placeholder="Optional..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTxDialog(null)}>Cancel</Button>
+            <Button onClick={handleTx} disabled={saving}>
+              {saving ? "Saving..." : txDialog?.type === "use" ? "Record Use" : "Restock"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Transaction History Dialog ────────────────────────── */}
+      <Dialog open={!!historyItem} onOpenChange={open => !open && setHistoryItem(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="w-4 h-4" /> Transaction History
+            </DialogTitle>
+            <DialogDescription>{historyItem?.name}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-80 overflow-y-auto">
+            {historyLoading ? (
+              <div className="py-8 text-center text-muted-foreground text-sm">Loading...</div>
+            ) : historyData.length === 0 ? (
+              <div className="py-8 text-center text-muted-foreground text-sm">No transactions yet</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Qty</TableHead>
+                    <TableHead>Before → After</TableHead>
+                    <TableHead>Notes</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {historyData.map((tx: any) => (
+                    <TableRow key={tx.id}>
+                      <TableCell className="text-xs">{tx.transaction_date}</TableCell>
+                      <TableCell>
+                        <span className={`text-xs font-semibold capitalize ${txTypeColors[tx.type] ?? ""}`}>{tx.type}</span>
+                      </TableCell>
+                      <TableCell className="text-sm">{tx.quantity}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{tx.quantity_before} → {tx.quantity_after}</TableCell>
+                      <TableCell className="text-xs">{tx.notes ?? "—"}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmDialog
+        open={!!deleteId} onOpenChange={open => !open && setDeleteId(null)}
+        onConfirm={handleDelete} title="Delete Item"
+        description="Are you sure? This action cannot be undone."
+      />
     </PageShell>
   );
 }

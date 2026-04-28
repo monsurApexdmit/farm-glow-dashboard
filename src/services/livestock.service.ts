@@ -6,8 +6,7 @@ class LivestockService {
   async getLivestock(farmId?: string): Promise<Livestock[]> {
     const url = farmId ? `${API_ENDPOINTS.LIVESTOCK}?farm_id=${farmId}` : API_ENDPOINTS.LIVESTOCK;
     const res = await apiClient.get<any>(url);
-    const data = Array.isArray(res.data) ? res.data : (res.livestock || res.data || res || []);
-    return Array.isArray(data) ? data : [];
+    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
   }
 
   async getLivestockItem(id: string): Promise<Livestock> {
@@ -34,6 +33,14 @@ class LivestockService {
 
   async logHealth(id: string, healthData: any): Promise<any> {
     return apiClient.post<any>(API_ENDPOINTS.LIVESTOCK_HEALTH(id), healthData);
+  }
+
+  async getInventorySummary(farmId?: string): Promise<any[]> {
+    const url = farmId
+      ? `${API_ENDPOINTS.LIVESTOCK_INVENTORY_SUMMARY}?farm_id=${farmId}`
+      : API_ENDPOINTS.LIVESTOCK_INVENTORY_SUMMARY;
+    const res = await apiClient.get<any>(url);
+    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
   }
 }
 

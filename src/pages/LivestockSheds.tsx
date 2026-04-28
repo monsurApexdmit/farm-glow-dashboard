@@ -235,16 +235,23 @@ const LivestockSheds = () => {
       let nextCol = 0;
       let nextRow = 0;
 
+      const newPositions: Record<string, { row: number; col: number; rowSpan: number; colSpan: number }> = {};
+
       const mapped: Shed[] = shedsArr.map((s: any) => {
         const occupancy = liveArr.filter(l => l.shed_id === s.id).length;
-        const pos = positions[s.id] ?? (() => {
-          const p = { row: nextRow, col: nextCol, rowSpan: 1, colSpan: 1 };
-          nextCol++;
-          if (nextCol >= GRID_COLS) { nextCol = 0; nextRow++; }
-          return p;
-        })();
+        const pos = (s.grid_row != null && s.grid_col != null)
+          ? { row: s.grid_row, col: s.grid_col, rowSpan: s.grid_row_span ?? 1, colSpan: s.grid_col_span ?? 1 }
+          : (() => {
+              const p = { row: nextRow, col: nextCol, rowSpan: 1, colSpan: 1 };
+              nextCol++;
+              if (nextCol >= GRID_COLS) { nextCol = 0; nextRow++; }
+              return p;
+            })();
+        newPositions[s.id] = pos;
         return mapBackendToShed(s, occupancy, pos);
       });
+
+      setPositions(newPositions);
 
       setSheds(mapped);
       setFarms(Array.isArray(farmsData) ? farmsData : []);
@@ -350,12 +357,20 @@ const LivestockSheds = () => {
     }
   };
 
-  // --- Move (FarmGridMap drag-drop) — local only ---
-  const handleMove = (id: string, row: number, col: number) => {
-    setPositions(prev => ({ ...prev, [id]: { ...prev[id], row, col, rowSpan: prev[id]?.rowSpan ?? 1, colSpan: prev[id]?.colSpan ?? 1 } }));
+  // --- Move (FarmGridMap drag-drop) ---
+  const handleMove = async (id: string, row: number, col: number) => {
+    const rowSpan = positions[id]?.rowSpan ?? 1;
+    const colSpan = positions[id]?.colSpan ?? 1;
+    setPositions(prev => ({ ...prev, [id]: { ...prev[id], row, col, rowSpan, colSpan } }));
     setSheds(prev => prev.map(s => s.id === id ? { ...s, row, col } : s));
     setSelected(prev => prev?.id === id ? { ...prev, row, col } : prev);
-    toast({ title: "Shed moved", description: "Shed position updated on the layout." });
+    try {
+      await shedService.updateShed(id, { grid_row: row, grid_col: col, grid_row_span: rowSpan, grid_col_span: colSpan });
+      toast({ title: "Shed moved", description: "Shed position saved." });
+    } catch {
+      toast({ title: "Failed to save position", description: "Position reverted.", variant: "destructive" });
+      await loadData();
+    }
   };
 
   // --- Daily Records (local only — no backend endpoint yet) ---

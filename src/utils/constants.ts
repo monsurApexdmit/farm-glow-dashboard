@@ -26,6 +26,7 @@ export const API_ENDPOINTS = {
 
   // Livestock
   LIVESTOCK: '/api/v1/livestock',
+  LIVESTOCK_INVENTORY_SUMMARY: '/api/v1/livestock/inventory-summary',
   LIVESTOCK_HEALTH: (id: string) => `/api/v1/livestock/${id}/health`,
 
   // Sheds
@@ -79,6 +80,13 @@ export const API_ENDPOINTS = {
   BUDGETS_SUMMARY: '/api/v1/budgets/summary',
   REPORTS: '/api/v1/reports',
   REPORTS_GENERATE: '/api/v1/reports/generate',
+  REPORTS_DOWNLOAD: (id: string) => `/api/v1/reports/${id}/download`,
+  REPORTS_SCHEDULE: '/api/v1/reports/schedule',
+
+  // Notifications
+  NOTIFICATIONS: '/api/v1/notifications',
+  NOTIFICATIONS_READ: (id: string) => `/api/v1/notifications/${id}/read`,
+  NOTIFICATIONS_SETTINGS: '/api/v1/notifications/settings',
 
   // Users
   USERS_ME: '/api/v1/users/me',

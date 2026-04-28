@@ -17,6 +17,8 @@ import { changePasswordSchema } from "@/utils/validation";
 import { authService } from "@/services/auth.service";
 import { apiClient } from "@/services/api";
 import { API_ENDPOINTS } from "@/utils/constants";
+import { useNotifications } from "@/context/NotificationContext";
+import { NotificationSettings } from "@/services/notification.service";
 
 interface PasswordFormData {
   current_password: string;
@@ -28,9 +30,15 @@ const Settings = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingNotificationSettings, setIsSavingNotificationSettings] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [passwordError, setPasswordError] = useState("");
   const [passwordSuccess, setPasswordSuccess] = useState("");
+  const {
+    settings: notificationSettings,
+    isSettingsLoading,
+    saveSettings,
+  } = useNotifications();
 
   // Profile state
   const [profile, setProfile] = useState({
@@ -46,6 +54,12 @@ const Settings = () => {
     timezone: "UTC",
     theme: "light" as const,
     notifications_enabled: true,
+  });
+  const [backendNotificationSettings, setBackendNotificationSettings] = useState<NotificationSettings>({
+    notifications_enabled: true,
+    email_notifications: false,
+    sms_notifications: false,
+    push_notifications: true,
   });
 
   // Password form
@@ -70,6 +84,12 @@ const Settings = () => {
       loadPreferences();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (notificationSettings) {
+      setBackendNotificationSettings(notificationSettings);
+    }
+  }, [notificationSettings]);
 
   const loadPreferences = async () => {
     try {
@@ -141,6 +161,26 @@ const Settings = () => {
     } catch (error: any) {
       const errorMessage = error.message || error?.error || "Failed to change password";
       setPasswordError(errorMessage);
+    }
+  };
+
+  const handleNotificationSettingsSave = async () => {
+    setIsSavingNotificationSettings(true);
+    try {
+      const saved = await saveSettings(backendNotificationSettings);
+      setBackendNotificationSettings(saved);
+      toast({
+        title: "Success",
+        description: "Notification channels updated successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update notification channels",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingNotificationSettings(false);
     }
   };
 
@@ -228,6 +268,102 @@ const Settings = () => {
               </>
             )}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <Bell className="w-5 h-5 text-amber-600" />
+            <div>
+              <CardTitle className="text-lg">Notification Channels</CardTitle>
+              <CardDescription>Control email, SMS, and push delivery from the notifications backend.</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isSettingsLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader className="w-5 h-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div>
+                  <p className="font-medium">Enable Notifications</p>
+                  <p className="text-sm text-muted-foreground">Master toggle for in-app delivery.</p>
+                </div>
+                <Switch
+                  checked={backendNotificationSettings.notifications_enabled}
+                  onCheckedChange={(value) =>
+                    setBackendNotificationSettings((current) => ({
+                      ...current,
+                      notifications_enabled: value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div>
+                  <p className="font-medium">Email Notifications</p>
+                  <p className="text-sm text-muted-foreground">Send updates to your account email.</p>
+                </div>
+                <Switch
+                  checked={backendNotificationSettings.email_notifications}
+                  onCheckedChange={(value) =>
+                    setBackendNotificationSettings((current) => ({
+                      ...current,
+                      email_notifications: value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div>
+                  <p className="font-medium">SMS Notifications</p>
+                  <p className="text-sm text-muted-foreground">Use your saved phone number for urgent alerts.</p>
+                </div>
+                <Switch
+                  checked={backendNotificationSettings.sms_notifications}
+                  onCheckedChange={(value) =>
+                    setBackendNotificationSettings((current) => ({
+                      ...current,
+                      sms_notifications: value,
+                    }))
+                  }
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-4">
+                <div>
+                  <p className="font-medium">Push Notifications</p>
+                  <p className="text-sm text-muted-foreground">Enable browser or device push alerts.</p>
+                </div>
+                <Switch
+                  checked={backendNotificationSettings.push_notifications}
+                  onCheckedChange={(value) =>
+                    setBackendNotificationSettings((current) => ({
+                      ...current,
+                      push_notifications: value,
+                    }))
+                  }
+                />
+              </div>
+
+              <Button onClick={handleNotificationSettingsSave} disabled={isSavingNotificationSettings} className="gap-2">
+                {isSavingNotificationSettings ? (
+                  <>
+                    <Loader className="w-4 h-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Save Notification Channels
+                  </>
+                )}
+              </Button>
+            </>
+          )}
         </CardContent>
       </Card>
 

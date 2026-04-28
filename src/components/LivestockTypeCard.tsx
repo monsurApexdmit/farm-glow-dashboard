@@ -5,6 +5,20 @@ import { TrendingUp } from "lucide-react";
 
 type HealthStatus = "healthy" | "sick" | "treatment" | "quarantine";
 
+export interface BackendAnimal {
+  id: number;
+  tag_number: string;
+  name?: string;
+  breed?: string;
+  gender?: string;
+  health_status: HealthStatus;
+  weight?: string;
+  weight_unit?: string;
+  age_months?: number;
+  last_checkup?: string;
+  notes?: string;
+}
+
 export interface LivestockTypeData {
   type: string;
   label: string;
@@ -18,10 +32,12 @@ export interface LivestockTypeData {
   avgAge: string;
   avgWeight: string;
   productionRate: string;
+  animals?: BackendAnimal[];
 }
 
 export interface AnimalDetail {
   id: number;
+  backendId?: number;
   type: string;
   status: HealthStatus;
   animalTypeName: string;
@@ -29,6 +45,8 @@ export interface AnimalDetail {
   weight: string;
   lastCheckup: string;
   condition: string;
+  breed?: string;
+  gender?: string;
 }
 
 interface LivestockTypeCardProps {
@@ -165,22 +183,27 @@ export function LivestockTypeCard({ item, onAnimalClick }: LivestockTypeCardProp
           </div>
           <div className="grid grid-cols-8 gap-1">
             {animalStatuses.slice(0, 40).map((status, idx) => {
+              const raw = item.animals?.[idx];
+              const ageYears = raw?.age_months ? (raw.age_months / 12).toFixed(1) + " years" : item.avgAge;
               const animal: AnimalDetail = {
                 id: idx + 1,
+                backendId: raw?.id ?? idx + 1,
                 type: item.type,
-                status,
+                status: raw?.health_status ?? status,
                 animalTypeName: item.label,
-                age: item.avgAge,
-                weight: item.avgWeight,
-                lastCheckup: statusMeta[status].lastCheckup,
-                condition: statusMeta[status].condition,
+                age: ageYears,
+                weight: raw?.weight ? `${raw.weight} ${raw.weight_unit ?? "kg"}` : item.avgWeight,
+                lastCheckup: raw?.last_checkup ?? statusMeta[status].lastCheckup,
+                condition: statusMeta[raw?.health_status ?? status].condition,
+                breed: raw?.breed,
+                gender: raw?.gender,
               };
               return (
                 <button
                   key={idx}
                   onClick={() => onAnimalClick(animal)}
-                  className={`w-full aspect-square rounded flex items-center justify-center text-xs font-bold transition-all hover:scale-110 cursor-pointer ${statusMeta[status].color}`}
-                  title={`${item.label} #${idx + 1} - ${status}`}
+                  className={`w-full aspect-square rounded flex items-center justify-center text-xs font-bold transition-all hover:scale-110 cursor-pointer ${statusMeta[animal.status].color}`}
+                  title={`${item.label} #${raw?.id ?? idx + 1} - ${animal.status}`}
                 >
                   {item.icon}
                 </button>

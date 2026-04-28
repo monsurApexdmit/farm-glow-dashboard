@@ -4,4 +4,8 @@ export { cropService } from './crop.service';
 export { livestockService } from './livestock.service';
 export { livestockTypeService } from './livestocktype.service';
 export { shedService } from './shed.service';
+export { workerService } from './worker.service';
+export { scheduleService } from './schedule.service';
+export { financeService } from './finance.service';
+export { notificationService } from './notification.service';
 export { apiClient } from './api';

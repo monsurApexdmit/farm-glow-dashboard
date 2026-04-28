@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Users, UserCheck, UserX, Clock } from "lucide-react";
+import { Users, UserCheck, UserX, Clock, Loader } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { PageShell } from "@/components/PageShell";
 import { PageHeader } from "@/components/PageHeader";
@@ -12,12 +11,35 @@ import { SearchFilterBar } from "@/components/SearchFilterBar";
 import { FormModal } from "@/components/FormModal";
 import { DeleteConfirmDialog } from "@/components/DeleteConfirmDialog";
 import { TableActions, StatusSelect, StatusOption } from "@/components/TableActions";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { farmService } from "@/services/farm.service";
+import { BackendWorker, workerService } from "@/services/worker.service";
+import { Farm } from "@/types/common";
 
 type WorkerStatus = "active" | "on-leave" | "inactive";
 type WorkerRole = "Farm Manager" | "Field Worker" | "Equipment Operator" | "Veterinarian" | "Irrigation Specialist" | "Harvester";
+type EmploymentType = "full-time" | "part-time" | "contract" | "seasonal";
 
-interface Worker {
+interface WorkerRow {
   id: string;
+  farmId: string;
+  name: string;
+  firstName: string;
+  lastName: string;
+  role: WorkerRole;
+  phone: string;
+  email: string;
+  status: WorkerStatus;
+  hireDate: string;
+  dailyWage: number;
+  assignedArea: string;
+  employmentType: EmploymentType;
+  address: string;
+  emergencyContact: string;
+}
+
+interface WorkerForm {
+  farmId: string;
   name: string;
   role: WorkerRole;
   phone: string;
@@ -26,109 +48,356 @@ interface Worker {
   hireDate: string;
   dailyWage: number;
   assignedArea: string;
+  employmentType: EmploymentType;
+  emergencyContact: string;
 }
 
 const roles: WorkerRole[] = ["Farm Manager", "Field Worker", "Equipment Operator", "Veterinarian", "Irrigation Specialist", "Harvester"];
+const employmentTypes: EmploymentType[] = ["full-time", "part-time", "contract", "seasonal"];
 
 const statusOptions: StatusOption[] = [
-  { value: "active",   label: "Active",   className: "bg-primary/15 text-primary border-primary/30" },
+  { value: "active", label: "Active", className: "bg-primary/15 text-primary border-primary/30" },
   { value: "on-leave", label: "On Leave", className: "bg-accent/15 text-accent border-accent/30" },
   { value: "inactive", label: "Inactive", className: "bg-destructive/15 text-destructive border-destructive/30" },
 ];
 
-const initialWorkers: Worker[] = [
-  { id: "1", name: "John Mwangi",    role: "Farm Manager",          phone: "+254 712 345 678", email: "john@farm.com",   status: "active",   hireDate: "2022-03-15", dailyWage: 85, assignedArea: "All Fields" },
-  { id: "2", name: "Sarah Wanjiku",  role: "Field Worker",          phone: "+254 723 456 789", email: "sarah@farm.com",  status: "active",   hireDate: "2023-01-10", dailyWage: 45, assignedArea: "Field A" },
-  { id: "3", name: "James Otieno",   role: "Equipment Operator",    phone: "+254 734 567 890", email: "james@farm.com",  status: "on-leave", hireDate: "2022-08-20", dailyWage: 60, assignedArea: "Field B" },
-  { id: "4", name: "Mary Akinyi",    role: "Veterinarian",          phone: "+254 745 678 901", email: "mary@farm.com",   status: "active",   hireDate: "2023-06-01", dailyWage: 95, assignedArea: "Livestock Area" },
-  { id: "5", name: "Peter Kamau",    role: "Irrigation Specialist", phone: "+254 756 789 012", email: "peter@farm.com",  status: "active",   hireDate: "2023-03-22", dailyWage: 55, assignedArea: "Field C" },
-  { id: "6", name: "Grace Njeri",    role: "Harvester",             phone: "+254 767 890 123", email: "grace@farm.com",  status: "inactive", hireDate: "2022-11-05", dailyWage: 40, assignedArea: "Field A" },
-  { id: "7", name: "Daniel Kiprop",  role: "Field Worker",          phone: "+254 778 901 234", email: "daniel@farm.com", status: "active",   hireDate: "2024-01-15", dailyWage: 45, assignedArea: "Field D" },
-];
+const normalizeWorkerStatus = (worker: BackendWorker): WorkerStatus => {
+  const raw = worker.status || (worker.is_active === false ? "inactive" : "active");
+  if (raw === "on_leave") return "on-leave";
+  if (raw === "inactive") return "inactive";
+  return "active";
+};
 
-const emptyWorker = (): Omit<Worker, "id"> => ({
-  name: "", role: "Field Worker", phone: "", email: "", status: "active",
-  hireDate: new Date().toISOString().split("T")[0], dailyWage: 45, assignedArea: "",
+const toTitleCase = (value: string) =>
+  value
+    .split(" ")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+const splitName = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: parts[0] || "",
+    lastName: parts.slice(1).join(" ") || parts[0] || "",
+  };
+};
+
+const buildDisplayName = (worker: BackendWorker) => {
+  if (worker.name?.trim()) return worker.name.trim();
+  return `${worker.first_name || ""} ${worker.last_name || ""}`.trim();
+};
+
+const mapBackendToWorker = (worker: BackendWorker, farmsById: Record<string, Farm>): WorkerRow => {
+  const name = buildDisplayName(worker);
+  const names = splitName(name);
+  const farmName = farmsById[String(worker.farm_id)]?.name || "";
+  const role = roles.includes((worker.position || "") as WorkerRole)
+    ? (worker.position as WorkerRole)
+    : "Field Worker";
+
+  return {
+    id: String(worker.id),
+    farmId: String(worker.farm_id || ""),
+    name,
+    firstName: worker.first_name || names.firstName,
+    lastName: worker.last_name || names.lastName,
+    role,
+    phone: worker.phone || "",
+    email: worker.email || "",
+    status: normalizeWorkerStatus(worker),
+    hireDate: (worker.start_date || worker.hiring_date || worker.hire_date || "").split("T")[0],
+    dailyWage: Number(worker.hourly_rate ?? worker.salary ?? 0),
+    assignedArea: farmName || worker.address || "",
+    employmentType: worker.employment_type || "full-time",
+    address: worker.address || farmName || "",
+    emergencyContact: worker.emergency_contact || "",
+  };
+};
+
+const mapFormToBackend = (form: WorkerForm): Partial<BackendWorker> => {
+  const { firstName, lastName } = splitName(form.name);
+  return {
+    farm_id: form.farmId,
+    first_name: firstName,
+    last_name: lastName,
+    email: form.email,
+    phone: form.phone,
+    address: form.assignedArea,
+    employment_type: form.employmentType,
+    position: form.role,
+    start_date: form.hireDate,
+    hire_date: form.hireDate,
+    hiring_date: form.hireDate,
+    hourly_rate: Number(form.dailyWage) || 0,
+    salary: Number(form.dailyWage) || 0,
+    is_active: form.status === "active",
+    status: form.status === "on-leave" ? "on_leave" : form.status,
+    emergency_contact: form.emergencyContact,
+  };
+};
+
+const emptyWorker = (farmId = ""): WorkerForm => ({
+  farmId,
+  name: "",
+  role: "Field Worker",
+  phone: "",
+  email: "",
+  status: "active",
+  hireDate: new Date().toISOString().split("T")[0],
+  dailyWage: 45,
+  assignedArea: "",
+  employmentType: "full-time",
+  emergencyContact: "",
 });
 
 const Workers = () => {
-  const [workers, setWorkers] = useState<Worker[]>(initialWorkers);
+  const [workers, setWorkers] = useState<WorkerRow[]>([]);
+  const [farms, setFarms] = useState<Farm[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingWorker, setEditingWorker] = useState<Worker | null>(null);
-  const [deletingWorker, setDeletingWorker] = useState<Worker | null>(null);
-  const [form, setForm] = useState<Omit<Worker, "id">>(emptyWorker());
+  const [editingWorker, setEditingWorker] = useState<WorkerRow | null>(null);
+  const [deletingWorker, setDeletingWorker] = useState<WorkerRow | null>(null);
+  const [form, setForm] = useState<WorkerForm>(emptyWorker());
   const { toast } = useToast();
 
-  const filtered = workers.filter((w) => {
-    const matchSearch = w.name.toLowerCase().includes(search.toLowerCase()) ||
-      w.role.toLowerCase().includes(search.toLowerCase()) ||
-      w.assignedArea.toLowerCase().includes(search.toLowerCase());
-    return matchSearch &&
-      (roleFilter === "all" || w.role === roleFilter) &&
-      (statusFilter === "all" || w.status === statusFilter);
-  });
+  useEffect(() => {
+    loadData();
+  }, []);
 
-  const counts = {
-    total:    workers.length,
-    active:   workers.filter((w) => w.status === "active").length,
-    onLeave:  workers.filter((w) => w.status === "on-leave").length,
-    inactive: workers.filter((w) => w.status === "inactive").length,
+  const farmsById = useMemo(
+    () =>
+      farms.reduce<Record<string, Farm>>((acc, farm) => {
+        acc[String(farm.id)] = farm;
+        return acc;
+      }, {}),
+    [farms]
+  );
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [workersData, farmsData] = await Promise.all([
+        workerService.getWorkers(),
+        farmService.getFarms(),
+      ]);
+      const safeFarms = Array.isArray(farmsData) ? farmsData : [];
+      const farmMap = safeFarms.reduce<Record<string, Farm>>((acc, farm) => {
+        acc[String(farm.id)] = farm;
+        return acc;
+      }, {});
+      const safeWorkers = Array.isArray(workersData) ? workersData : [];
+      setFarms(safeFarms);
+      setWorkers(safeWorkers.map((worker) => mapBackendToWorker(worker, farmMap)));
+      if (!form.farmId && safeFarms[0]?.id) {
+        setForm((current) => ({ ...current, farmId: String(safeFarms[0].id) }));
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to load workers",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const openAdd = () => { setEditingWorker(null); setForm(emptyWorker()); setDialogOpen(true); };
-  const openEdit = (w: Worker) => { setEditingWorker(w); const { id, ...rest } = w; setForm(rest); setDialogOpen(true); };
+  const filtered = useMemo(
+    () =>
+      workers.filter((worker) => {
+        const matchSearch =
+          worker.name.toLowerCase().includes(search.toLowerCase()) ||
+          worker.role.toLowerCase().includes(search.toLowerCase()) ||
+          worker.assignedArea.toLowerCase().includes(search.toLowerCase());
+        return (
+          matchSearch &&
+          (roleFilter === "all" || worker.role === roleFilter) &&
+          (statusFilter === "all" || worker.status === statusFilter)
+        );
+      }),
+    [workers, search, roleFilter, statusFilter]
+  );
 
-  const handleSave = () => {
-    if (!form.name || !form.phone || !form.assignedArea) {
-      toast({ title: "Missing fields", description: "Please fill in all required fields.", variant: "destructive" }); return;
-    }
-    if (editingWorker) {
-      setWorkers((prev) => prev.map((w) => w.id === editingWorker.id ? { ...w, ...form } : w));
-      toast({ title: "Worker updated" });
-    } else {
-      setWorkers((prev) => [...prev, { ...form, id: Date.now().toString() }]);
-      toast({ title: "Worker added" });
-    }
-    setDialogOpen(false); setEditingWorker(null); setForm(emptyWorker());
+  const counts = useMemo(
+    () => ({
+      total: workers.length,
+      active: workers.filter((worker) => worker.status === "active").length,
+      onLeave: workers.filter((worker) => worker.status === "on-leave").length,
+      inactive: workers.filter((worker) => worker.status === "inactive").length,
+    }),
+    [workers]
+  );
+
+  const openAdd = () => {
+    setEditingWorker(null);
+    setForm(emptyWorker(String(farms[0]?.id || "")));
+    setDialogOpen(true);
   };
 
-  const handleDelete = () => {
-    if (deletingWorker) { setWorkers((prev) => prev.filter((w) => w.id !== deletingWorker.id)); toast({ title: "Worker removed" }); }
-    setDeletingWorker(null);
+  const openEdit = (worker: WorkerRow) => {
+    setEditingWorker(worker);
+    setForm({
+      farmId: worker.farmId,
+      name: worker.name,
+      role: worker.role,
+      phone: worker.phone,
+      email: worker.email,
+      status: worker.status,
+      hireDate: worker.hireDate,
+      dailyWage: worker.dailyWage,
+      assignedArea: worker.assignedArea,
+      employmentType: worker.employmentType,
+      emergencyContact: worker.emergencyContact,
+    });
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.phone.trim() || !form.farmId) {
+      toast({
+        title: "Missing fields",
+        description: "Name, phone, and farm are required.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = mapFormToBackend(form);
+      if (editingWorker) {
+        await workerService.updateWorker(editingWorker.id, payload);
+        toast({ title: "Worker updated" });
+      } else {
+        await workerService.createWorker(payload);
+        toast({ title: "Worker added" });
+      }
+      setDialogOpen(false);
+      setEditingWorker(null);
+      setForm(emptyWorker(String(farms[0]?.id || "")));
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to save worker",
+        variant: "destructive",
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deletingWorker) return;
+    try {
+      await workerService.deleteWorker(deletingWorker.id);
+      toast({ title: "Worker removed" });
+      setDeletingWorker(null);
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to delete worker",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleStatusChange = async (workerId: string, status: WorkerStatus) => {
+    const worker = workers.find((item) => item.id === workerId);
+    if (!worker) return;
+
+    setWorkers((prev) => prev.map((item) => (item.id === workerId ? { ...item, status } : item)));
+
+    try {
+      await workerService.updateWorker(workerId, {
+        is_active: status === "active",
+        status: status === "on-leave" ? "on_leave" : status,
+      });
+      toast({ title: "Worker status updated" });
+      await loadData();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update worker status",
+        variant: "destructive",
+      });
+      await loadData();
+    }
   };
 
   const handleExport = () => {
     const headers = ["Name", "Role", "Phone", "Email", "Status", "Hire Date", "Daily Wage", "Assigned Area"];
-    const rows = filtered.map((w) => [w.name, w.role, w.phone, w.email, w.status, w.hireDate, w.dailyWage, w.assignedArea].join(","));
+    const rows = filtered.map((worker) => [
+      worker.name,
+      worker.role,
+      worker.phone,
+      worker.email,
+      worker.status,
+      worker.hireDate,
+      worker.dailyWage,
+      worker.assignedArea,
+    ].join(","));
     const csv = [headers.join(","), ...rows].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "workers.csv"; a.click();
-    URL.revokeObjectURL(url); toast({ title: "Exported workers data" });
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "workers.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({ title: "Exported workers data" });
   };
+
+  if (loading) {
+    return (
+      <PageShell>
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <Loader className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell>
-      <PageHeader title="Workers" description="Manage farm staff and their assignments"
-        addLabel="Add Worker" onAdd={openAdd} onExport={handleExport} />
+      <PageHeader
+        title="Workers"
+        description="Manage farm staff and their assignments"
+        addLabel="Add Worker"
+        onAdd={openAdd}
+        onExport={handleExport}
+      />
 
       <StatCards columns="grid-cols-2 sm:grid-cols-4" stats={[
-        { label: "Total Workers", value: counts.total,    icon: <Users    className="w-6 h-6 text-primary" /> },
-        { label: "Active",        value: counts.active,   icon: <UserCheck className="w-6 h-6 text-primary" /> },
-        { label: "On Leave",      value: counts.onLeave,  icon: <Clock    className="w-6 h-6 text-accent" />,      color: "text-accent" },
-        { label: "Inactive",      value: counts.inactive, icon: <UserX    className="w-6 h-6 text-destructive" />, color: "text-destructive" },
+        { label: "Total Workers", value: counts.total, icon: <Users className="w-6 h-6 text-primary" /> },
+        { label: "Active", value: counts.active, icon: <UserCheck className="w-6 h-6 text-primary" /> },
+        { label: "On Leave", value: counts.onLeave, icon: <Clock className="w-6 h-6 text-accent" />, color: "text-accent" },
+        { label: "Inactive", value: counts.inactive, icon: <UserX className="w-6 h-6 text-destructive" />, color: "text-destructive" },
       ]} />
 
       <SearchFilterBar
-        search={search} onSearch={setSearch} searchPlaceholder="Search workers..."
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="Search workers..."
         filters={[
-          { value: roleFilter, onChange: setRoleFilter, placeholder: "Role", width: "w-[180px]",
-            options: [{ value: "all", label: "All Roles" }, ...roles.map((r) => ({ value: r, label: r }))] },
-          { value: statusFilter, onChange: setStatusFilter, placeholder: "Status",
-            options: [{ value: "all", label: "All Status" }, ...statusOptions.map((s) => ({ value: s.value, label: s.label }))] },
+          {
+            value: roleFilter,
+            onChange: setRoleFilter,
+            placeholder: "Role",
+            width: "w-[180px]",
+            options: [{ value: "all", label: "All Roles" }, ...roles.map((role) => ({ value: role, label: role }))],
+          },
+          {
+            value: statusFilter,
+            onChange: setStatusFilter,
+            placeholder: "Status",
+            options: [{ value: "all", label: "All Status" }, ...statusOptions.map((status) => ({ value: status.value, label: status.label }))],
+          },
         ]}
       />
 
@@ -149,19 +418,25 @@ const Workers = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((w) => (
-                <TableRow key={w.id}>
-                  <TableCell className="font-medium">{w.name}</TableCell>
-                  <TableCell>{w.role}</TableCell>
-                  <TableCell>{w.phone}</TableCell>
+              {filtered.map((worker) => (
+                <TableRow key={worker.id}>
+                  <TableCell className="font-medium">{worker.name}</TableCell>
+                  <TableCell>{worker.role}</TableCell>
+                  <TableCell>{worker.phone}</TableCell>
                   <TableCell>
-                    <StatusSelect value={w.status} options={statusOptions} width="w-[120px]"
-                      onChange={(v) => setWorkers((prev) => prev.map((x) => x.id === w.id ? { ...x, status: v as WorkerStatus } : x))} />
+                    <StatusSelect
+                      value={worker.status}
+                      options={statusOptions}
+                      width="w-[120px]"
+                      onChange={(value) => handleStatusChange(worker.id, value as WorkerStatus)}
+                    />
                   </TableCell>
-                  <TableCell>${w.dailyWage}</TableCell>
-                  <TableCell>{w.assignedArea}</TableCell>
-                  <TableCell>{w.hireDate}</TableCell>
-                  <TableCell className="text-right"><TableActions onEdit={() => openEdit(w)} onDelete={() => setDeletingWorker(w)} /></TableCell>
+                  <TableCell>${worker.dailyWage}</TableCell>
+                  <TableCell>{worker.assignedArea}</TableCell>
+                  <TableCell>{worker.hireDate}</TableCell>
+                  <TableCell className="text-right">
+                    <TableActions onEdit={() => openEdit(worker)} onDelete={() => setDeletingWorker(worker)} />
+                  </TableCell>
                 </TableRow>
               ))}
               {filtered.length === 0 && (
@@ -172,14 +447,39 @@ const Workers = () => {
         </CardContent>
       </Card>
 
-      <FormModal open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) { setEditingWorker(null); setForm(emptyWorker()); } }}
-        title={editingWorker ? "Edit Worker" : "Add Worker"} onSave={handleSave} saveLabel={editingWorker ? "Update Worker" : "Add Worker"}>
+      <FormModal
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) {
+            setEditingWorker(null);
+            setForm(emptyWorker(String(farms[0]?.id || "")));
+          }
+        }}
+        title={editingWorker ? "Edit Worker" : "Add Worker"}
+        onSave={handleSave}
+        saveLabel={saving ? "Saving..." : editingWorker ? "Update Worker" : "Add Worker"}
+      >
         <div className="grid grid-cols-2 gap-3">
           <div><label className="text-sm font-medium">Name *</label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
           <div><label className="text-sm font-medium">Role</label>
-            <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v as WorkerRole })}>
+            <Select value={form.role} onValueChange={(value) => setForm({ ...form, role: value as WorkerRole })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{roles.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+              <SelectContent>{roles.map((role) => <SelectItem key={role} value={role}>{role}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-sm font-medium">Farm *</label>
+            <Select value={form.farmId} onValueChange={(value) => setForm({ ...form, farmId: value })}>
+              <SelectTrigger><SelectValue placeholder="Select farm" /></SelectTrigger>
+              <SelectContent>{farms.map((farm) => <SelectItem key={farm.id} value={String(farm.id)}>{farm.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div><label className="text-sm font-medium">Employment Type</label>
+            <Select value={form.employmentType} onValueChange={(value) => setForm({ ...form, employmentType: value as EmploymentType })}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{employmentTypes.map((type) => <SelectItem key={type} value={type}>{toTitleCase(type.replace("-", " "))}</SelectItem>)}</SelectContent>
             </Select>
           </div>
         </div>
@@ -189,19 +489,27 @@ const Workers = () => {
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div><label className="text-sm font-medium">Status</label>
-            <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as WorkerStatus })}>
+            <Select value={form.status} onValueChange={(value) => setForm({ ...form, status: value as WorkerStatus })}>
               <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>{statusOptions.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+              <SelectContent>{statusOptions.map((status) => <SelectItem key={status.value} value={status.value}>{status.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div><label className="text-sm font-medium">Daily Wage ($)</label><Input type="number" value={form.dailyWage} onChange={(e) => setForm({ ...form, dailyWage: Number(e.target.value) })} /></div>
           <div><label className="text-sm font-medium">Hire Date</label><Input type="date" value={form.hireDate} onChange={(e) => setForm({ ...form, hireDate: e.target.value })} /></div>
         </div>
-        <div><label className="text-sm font-medium">Assigned Area *</label><Input value={form.assignedArea} onChange={(e) => setForm({ ...form, assignedArea: e.target.value })} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="text-sm font-medium">Assigned Area</label><Input value={form.assignedArea} onChange={(e) => setForm({ ...form, assignedArea: e.target.value })} /></div>
+          <div><label className="text-sm font-medium">Emergency Contact</label><Input value={form.emergencyContact} onChange={(e) => setForm({ ...form, emergencyContact: e.target.value })} /></div>
+        </div>
       </FormModal>
 
-      <DeleteConfirmDialog open={deletingWorker !== null} onOpenChange={(open) => !open && setDeletingWorker(null)}
-        onConfirm={handleDelete} title={`Delete ${deletingWorker?.name}?`} description="This action cannot be undone." />
+      <DeleteConfirmDialog
+        open={deletingWorker !== null}
+        onOpenChange={(open) => !open && setDeletingWorker(null)}
+        onConfirm={handleDelete}
+        title={`Delete ${deletingWorker?.name}?`}
+        description="This action cannot be undone."
+      />
     </PageShell>
   );
 };

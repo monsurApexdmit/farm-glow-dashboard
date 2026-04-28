@@ -56,6 +56,16 @@ class FarmService {
     return { ...data, ...field } as Field;
   }
 
+  async getField(id: string): Promise<Field> {
+    const res = await apiClient.get<any>(`${API_ENDPOINTS.FIELDS}/${id}`);
+    const field = res.data || res.field || res;
+    return field as Field;
+  }
+
+  async getFieldMap(id: string): Promise<any> {
+    return apiClient.get<any>(API_ENDPOINTS.FIELDS_MAP(id));
+  }
+
   async updateField(id: string, data: Partial<Field>): Promise<Field> {
     const res = await apiClient.put<any>(`${API_ENDPOINTS.FIELDS}/${id}`, data);
     const field = res.field || res.data || res;

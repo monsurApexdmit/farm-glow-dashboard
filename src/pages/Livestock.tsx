@@ -94,8 +94,8 @@ const emptyForm: Omit<Livestock, "id"> = {
 
 const mapBackendToLivestock = (l: BackendLivestock): Livestock => ({
   id: l.id,
-  name: l.name,
-  breed: l.breed,
+  name: l.name || (l as any).tag_number || `Animal #${l.id}`,
+  breed: l.breed || "",
   tag_number: l.tag_number,
   date_of_birth: l.date_of_birth ? (l.date_of_birth.split('T')[0] || l.date_of_birth.split(' ')[0]) : "",
   weight: l.weight,
@@ -173,9 +173,9 @@ const Livestock = () => {
   const filtered = useMemo(() => {
     return livestock.filter((l) => {
       const matchSearch =
-        l.name.toLowerCase().includes(search.toLowerCase()) ||
-        l.breed.toLowerCase().includes(search.toLowerCase()) ||
-        l.tag_number.toLowerCase().includes(search.toLowerCase());
+        (l.name || "").toLowerCase().includes(search.toLowerCase()) ||
+        (l.breed || "").toLowerCase().includes(search.toLowerCase()) ||
+        (l.tag_number || "").toLowerCase().includes(search.toLowerCase());
       const matchStatus = statusFilter === "all" || l.status === statusFilter;
       return matchSearch && matchStatus;
     });

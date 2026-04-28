@@ -70,6 +70,10 @@ export interface LivestockShed extends BaseEntity {
   width: number;
   height: number;
   constructed_date: string;
+  grid_row?: number;
+  grid_col?: number;
+  grid_row_span?: number;
+  grid_col_span?: number;
   deleted_at?: string;
 }
 

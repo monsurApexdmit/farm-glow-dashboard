@@ -1,5 +1,20 @@
-import { useState } from "react";
-import { Moon, Sun, Bell, Search, User, Settings, LogOut, CreditCard } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Moon,
+  Sun,
+  Bell,
+  Search,
+  User,
+  Settings,
+  LogOut,
+  CreditCard,
+  Loader,
+  CheckCircle,
+  CloudRain,
+  Package,
+  Clock,
+  AlertTriangle,
+} from "lucide-react";
 import { useTheme } from "@/hooks/use-theme";
 import { useAuth } from "@/hooks/useAuth";
 import { useNavigate } from "react-router-dom";
@@ -18,14 +33,53 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { useNotifications } from "@/context/NotificationContext";
+import { BackendNotification } from "@/services/notification.service";
 
-const notifications = [
-  { id: 1, title: "Low inventory alert", desc: "Fertilizer stock below threshold", time: "5 min ago", unread: true },
-  { id: 2, title: "Weather warning", desc: "Heavy rain expected tomorrow", time: "1 hour ago", unread: true },
-  { id: 3, title: "Task completed", desc: "Irrigation in Zone A finished", time: "3 hours ago", unread: false },
-  { id: 4, title: "New worker added", desc: "Maria joined the team", time: "Yesterday", unread: false },
-  { id: 5, title: "Harvest reminder", desc: "Wheat field B3 ready for harvest", time: "Yesterday", unread: false },
-];
+interface HeaderNotification {
+  id: string;
+  title: string;
+  message: string;
+  time: string;
+  unread: boolean;
+  icon: typeof Bell;
+}
+
+const relativeTime = (value?: string) => {
+  if (!value) return "Just now";
+  const diff = Date.now() - new Date(value).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours > 1 ? "s" : ""} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days > 1 ? "s" : ""} ago`;
+};
+
+const mapNotification = (notification: BackendNotification): HeaderNotification => {
+  const text = `${notification.title || ""} ${notification.message || ""}`.toLowerCase();
+  let icon = CheckCircle;
+
+  if (text.includes("rain") || text.includes("storm") || text.includes("frost") || text.includes("weather")) {
+    icon = CloudRain;
+  } else if (text.includes("stock") || text.includes("inventory") || text.includes("feed") || text.includes("seed")) {
+    icon = Package;
+  } else if (text.includes("task") || text.includes("schedule") || text.includes("maintenance") || text.includes("harvest")) {
+    icon = Clock;
+  } else if (notification.type === "alert" || notification.type === "warning") {
+    icon = AlertTriangle;
+  }
+
+  return {
+    id: String(notification.id),
+    title: notification.title || "Notification",
+    message: notification.message || "",
+    time: relativeTime(notification.created_at),
+    unread: !notification.is_read && !notification.read_at,
+    icon,
+  };
+};
 
 const profileMenuItems = [
   { icon: User, label: "My Profile", path: "/settings" },
@@ -37,7 +91,13 @@ export function DashboardHeader() {
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { notifications, unreadCount, isLoading, markAsRead, markAllAsRead } = useNotifications();
   const [profileOpen, setProfileOpen] = useState(false);
+
+  const recentNotifications = useMemo(
+    () => notifications.slice(0, 5).map(mapNotification),
+    [notifications]
+  );
 
   const getInitials = () => {
     if (!user) return "U";
@@ -73,31 +133,64 @@ export function DashboardHeader() {
             <PopoverTrigger asChild>
               <button className="relative p-2 rounded-lg hover:bg-muted transition-colors">
                 <Bell className="w-5 h-5 text-muted-foreground" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-destructive rounded-full" />
+                {unreadCount > 0 && (
+                  <>
+                    <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-destructive" />
+                    <span className="absolute -top-1 -right-1 min-w-4 rounded-full bg-destructive px-1 text-[10px] font-semibold leading-4 text-destructive-foreground">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  </>
+                )}
               </button>
             </PopoverTrigger>
             <PopoverContent className="w-80 p-0" align="end">
               <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                 <h4 className="text-sm font-semibold">Notifications</h4>
-                <Button variant="ghost" size="sm" className="text-xs text-muted-foreground h-auto p-0 hover:text-foreground">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={unreadCount === 0}
+                  className="text-xs text-muted-foreground h-auto p-0 hover:text-foreground"
+                  onClick={() => void markAllAsRead()}
+                >
                   Mark all read
                 </Button>
               </div>
               <div className="max-h-80 overflow-y-auto">
-                {notifications.map((n) => (
-                  <div
-                    key={n.id}
-                    className={`flex items-start gap-3 px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors border-b border-border last:border-0 ${n.unread ? "bg-primary/5" : ""}`}
-                    onClick={() => navigate("/notifications")}
-                  >
-                    <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${n.unread ? "bg-primary" : "bg-transparent"}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{n.title}</p>
-                      <p className="text-xs text-muted-foreground truncate">{n.desc}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{n.time}</p>
-                    </div>
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
-                ))}
+                ) : recentNotifications.length ? (
+                  recentNotifications.map((notification) => (
+                    <div
+                      key={notification.id}
+                      className={`flex items-start gap-3 px-4 py-3 hover:bg-muted/50 cursor-pointer transition-colors border-b border-border last:border-0 ${notification.unread ? "bg-primary/5" : ""}`}
+                      onClick={async () => {
+                        if (notification.unread) {
+                          await markAsRead(notification.id);
+                        }
+                        navigate("/notifications");
+                      }}
+                    >
+                      <div className="mt-0.5 rounded-md bg-muted p-2">
+                        <notification.icon className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">{notification.title}</p>
+                          {notification.unread && <div className="h-2 w-2 rounded-full bg-primary" />}
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate">{notification.message}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{notification.time}</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+                    No notifications yet.
+                  </div>
+                )}
               </div>
               <div className="border-t border-border p-2">
                 <Button
