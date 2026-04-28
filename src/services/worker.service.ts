@@ -1,5 +1,7 @@
 import { apiClient } from './api';
 import { API_ENDPOINTS } from '@/utils/constants';
+import { PaginatedResponse } from '@/types/api';
+import { buildQueryString, normalizePaginatedResponse } from '@/utils/paginated';
 
 export interface BackendWorker {
   id: string;
@@ -26,10 +28,24 @@ export interface BackendWorker {
 }
 
 class WorkerService {
-  async getWorkers(farmId?: string): Promise<BackendWorker[]> {
-    const url = farmId ? `${API_ENDPOINTS.WORKERS}?farm_id=${farmId}` : API_ENDPOINTS.WORKERS;
-    const res = await apiClient.get<any>(url);
-    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+  async getWorkers(params?: {
+    farmId?: string;
+    page?: number;
+    perPage?: number;
+    search?: string;
+    role?: string;
+    status?: string;
+  }): Promise<PaginatedResponse<BackendWorker>> {
+    const query = buildQueryString({
+      farm_id: params?.farmId,
+      page: params?.page,
+      per_page: params?.perPage,
+      search: params?.search,
+      role: params?.role,
+      status: params?.status,
+    });
+    const res = await apiClient.get<any>(`${API_ENDPOINTS.WORKERS}${query}`);
+    return normalizePaginatedResponse<BackendWorker>(res, params?.page, params?.perPage, ["workers"]);
   }
 
   async getWorker(id: string): Promise<BackendWorker> {

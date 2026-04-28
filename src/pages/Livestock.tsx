@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,8 @@ import { livestockService } from "@/services/livestock.service";
 import { farmService } from "@/services/farm.service";
 import { shedService } from "@/services/shed.service";
 import { Livestock as BackendLivestock, Farm, LivestockShed } from "@/types/common";
+import { PaginatedResponse } from "@/types/api";
+import { ListPagination } from "@/components/ListPagination";
 
 export type LivestockStatus = "active" | "inactive" | "sold" | "deceased";
 
@@ -120,10 +122,19 @@ const mapLivestockToBackend = (l: Omit<Livestock, "id">): Partial<BackendLivesto
 });
 
 const Livestock = () => {
+  const perPage = 10;
   const [livestock, setLivestock] = useState<Livestock[]>([]);
   const [farms, setFarms] = useState<Farm[]>([]);
   const [sheds, setSheds] = useState<LivestockShed[]>([]);
   const [livestockTypes, setLivestockTypes] = useState<LivestockType[]>([]);
+  const [pagination, setPagination] = useState<PaginatedResponse<Livestock>["meta"]>({
+    current_page: 1,
+    from: 0,
+    to: 0,
+    total: 0,
+    per_page: perPage,
+    last_page: 1,
+  });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -134,21 +145,35 @@ const Livestock = () => {
   const [form, setForm] = useState<Omit<Livestock, "id">>(emptyForm);
 
   useEffect(() => {
-    loadData();
+    loadData(1);
   }, []);
 
-  const loadData = async () => {
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadData(1);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [search, statusFilter]);
+
+  const loadData = async (page = pagination.current_page) => {
     setLoading(true);
     try {
-      const [livestockData, farmsData, typesData, shedsData] = await Promise.all([
-        livestockService.getLivestock(),
+      const [livestockResponse, farmsData, typesData, shedsData] = await Promise.all([
+        livestockService.getLivestock({
+          page,
+          perPage,
+          search,
+          status: statusFilter,
+        }),
         farmService.getFarms(),
         livestockTypeService.getTypes(),
         shedService.getSheds(),
       ]);
+      const livestockData = Array.isArray(livestockResponse?.data) ? livestockResponse.data : [];
       const farmsArr = Array.isArray(farmsData) ? farmsData : [];
       const shedsArr = Array.isArray(shedsData) ? shedsData : [];
-      const formattedLivestock = (Array.isArray(livestockData) ? livestockData : []).map(l => {
+      const formattedLivestock = livestockData.map(l => {
         const farm = farmsArr.find(f => f.id === l.farm_id);
         const shed = shedsArr.find(s => s.id === l.shed_id);
         return {
@@ -158,6 +183,7 @@ const Livestock = () => {
         };
       });
       setLivestock(formattedLivestock);
+      setPagination(livestockResponse.meta);
       setFarms(farmsArr);
       setSheds(shedsArr);
       setLivestockTypes(Array.isArray(typesData) ? typesData : []);
@@ -169,17 +195,6 @@ const Livestock = () => {
     }
     setLoading(false);
   };
-
-  const filtered = useMemo(() => {
-    return livestock.filter((l) => {
-      const matchSearch =
-        (l.name || "").toLowerCase().includes(search.toLowerCase()) ||
-        (l.breed || "").toLowerCase().includes(search.toLowerCase()) ||
-        (l.tag_number || "").toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === "all" || l.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [livestock, search, statusFilter]);
 
   const openAdd = () => {
     setEditingItem(null);
@@ -227,7 +242,7 @@ const Livestock = () => {
         toast.success(`${form.name} added successfully`);
       }
       setDialogOpen(false);
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (error: any) {
       toast.error(error.message || "Failed to save livestock");
     }
@@ -238,7 +253,8 @@ const Livestock = () => {
       try {
         await livestockService.deleteLivestock(deletingItem.id);
         toast.success(`${deletingItem.name} deleted`);
-        await loadData();
+        const nextPage = livestock.length === 1 && pagination.current_page > 1 ? pagination.current_page - 1 : pagination.current_page;
+        await loadData(nextPage);
       } catch (error: any) {
         toast.error(error.message || "Failed to delete livestock");
       }
@@ -249,7 +265,7 @@ const Livestock = () => {
 
   const exportCSV = () => {
     const headers = ["Name", "Type", "Breed", "Tag Number", "Birth Date", "Weight", "Gender", "Status", "Farm"];
-    const rows = filtered.map((l) => [l.name, l.livestock_type_id, l.breed, l.tag_number, l.date_of_birth, l.weight, l.gender, l.status, l.farmName || ""]);
+    const rows = livestock.map((l) => [l.name, l.livestock_type_id, l.breed, l.tag_number, l.date_of_birth, l.weight, l.gender, l.status, l.farmName || ""]);
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${v}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -268,14 +284,14 @@ const Livestock = () => {
       backendData.livestock_type_id = item.livestock_type_id;
       await livestockService.updateLivestock(item.id, backendData);
       toast.success(`${item.name} status updated to ${statusConfig[newStatus].label}`);
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (error: any) {
       toast.error(error.message || "Failed to update status");
     }
   };
 
   const counts = {
-    total: livestock.length,
+    total: pagination.total,
     active: livestock.filter((l) => l.status === "active").length,
     inactive: livestock.filter((l) => l.status === "inactive").length,
     sold: livestock.filter((l) => l.status === "sold").length,
@@ -380,14 +396,14 @@ const Livestock = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.length === 0 ? (
+                  {livestock.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={11} className="text-center py-12 text-muted-foreground">
                         No livestock found
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filtered.map((item) => {
+                    livestock.map((item) => {
                       const status = (item.status as LivestockStatus) || "active";
                       const config = statusConfig[status] || statusConfig.active;
                       const typeName = livestockTypes.find(t => t.id === item.livestock_type_id)?.name || "Unknown";
@@ -436,6 +452,9 @@ const Livestock = () => {
                   )}
                 </TableBody>
               </Table>
+              <div className="px-4 pb-4">
+                <ListPagination meta={pagination} onPageChange={(page) => void loadData(page)} />
+              </div>
             </CardContent>
           </Card>
         </main>

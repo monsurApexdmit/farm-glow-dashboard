@@ -19,6 +19,8 @@ import { useToast } from "@/hooks/use-toast";
 import { inventoryService, BackendInventoryItem, BackendCategory, BackendSupplier } from "@/services/inventory.service";
 import { farmService } from "@/services/farm.service";
 import { Farm } from "@/types/common";
+import { PaginatedResponse } from "@/types/api";
+import { ListPagination } from "@/components/ListPagination";
 
 type StockStatus = "in-stock" | "low-stock" | "out-of-stock";
 
@@ -49,6 +51,7 @@ const emptyForm = () => ({
 });
 
 export default function Inventory() {
+  const perPage = 10;
   const { toast } = useToast();
 
   // Data
@@ -57,6 +60,14 @@ export default function Inventory() {
   const [suppliers, setSuppliers]   = useState<BackendSupplier[]>([]);
   const [farms, setFarms]           = useState<Farm[]>([]);
   const [totalValue, setTotalValue] = useState(0);
+  const [pagination, setPagination] = useState<PaginatedResponse<BackendInventoryItem>["meta"]>({
+    current_page: 1,
+    from: 0,
+    to: 0,
+    total: 0,
+    per_page: perPage,
+    last_page: 1,
+  });
   const [loading, setLoading]       = useState(true);
   const [saving, setSaving]         = useState(false);
 
@@ -82,17 +93,24 @@ export default function Inventory() {
   const [historyData, setHistoryData]     = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const loadData = async () => {
+  const loadData = async (page = pagination.current_page) => {
     setLoading(true);
     try {
-      const [itemsData, catsData, supsData, farmsData, value] = await Promise.all([
-        inventoryService.getItems(),
+      const [itemsResponse, catsData, supsData, farmsData, value] = await Promise.all([
+        inventoryService.getItems({
+          page,
+          perPage,
+          search,
+          category: filterCategory,
+          stock: filterStock,
+        }),
         inventoryService.getCategories(),
         inventoryService.getSuppliers(),
         farmService.getFarms(),
         inventoryService.getTotalValue(),
       ]);
-      setItems(itemsData);
+      setItems(Array.isArray(itemsResponse.data) ? itemsResponse.data : []);
+      setPagination(itemsResponse.meta);
       setCategories(catsData);
       setSuppliers(supsData);
       setFarms(Array.isArray(farmsData) ? farmsData : []);
@@ -104,25 +122,20 @@ export default function Inventory() {
     }
   };
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { void loadData(1); }, []);
 
-  const filtered = useMemo(() =>
-    items.filter((item) => {
-      const catName = item.category?.name ?? "";
-      const supName = item.supplier?.name ?? "";
-      const matchSearch = item.name.toLowerCase().includes(search.toLowerCase()) ||
-        supName.toLowerCase().includes(search.toLowerCase()) ||
-        item.sku.toLowerCase().includes(search.toLowerCase());
-      const matchCat   = filterCategory === "all" || item.category_id === filterCategory;
-      const matchStock = filterStock === "all" || getStockStatus(item) === filterStock;
-      return matchSearch && matchCat && matchStock;
-    }), [items, search, filterCategory, filterStock]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadData(1);
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [search, filterCategory, filterStock]);
 
   const stats = useMemo(() => ({
-    total:      items.length,
+    total:      pagination.total,
     lowStock:   items.filter(i => getStockStatus(i) === "low-stock").length,
     outOfStock: items.filter(i => getStockStatus(i) === "out-of-stock").length,
-  }), [items]);
+  }), [items, pagination.total]);
 
   // ── Add / Edit ─────────────────────────────────────────────────
   const openAdd = () => {
@@ -168,7 +181,7 @@ export default function Inventory() {
         toast({ title: "Item added" });
       }
       setDialogOpen(false);
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (err: any) {
       toast({ title: "Failed to save item", description: err?.response?.data?.message ?? err.message, variant: "destructive" });
     } finally {
@@ -181,7 +194,8 @@ export default function Inventory() {
     try {
       await inventoryService.deleteItem(deleteId);
       toast({ title: "Item deleted" });
-      await loadData();
+      const nextPage = items.length === 1 && pagination.current_page > 1 ? pagination.current_page - 1 : pagination.current_page;
+      await loadData(nextPage);
     } catch {
       toast({ title: "Failed to delete item", variant: "destructive" });
     } finally {
@@ -210,7 +224,7 @@ export default function Inventory() {
         toast({ title: "Restock recorded" });
       }
       setTxDialog(null);
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (err: any) {
       toast({ title: "Failed to record transaction", description: err?.response?.data?.error ?? err.message, variant: "destructive" });
     } finally {
@@ -235,7 +249,7 @@ export default function Inventory() {
   // ── CSV Export ─────────────────────────────────────────────────
   const exportCSV = () => {
     const headers = ["Name", "SKU", "Category", "Quantity", "Unit", "Min Stock", "Cost/Unit", "Total Value", "Supplier", "Location", "Status"];
-    const rows = filtered.map(i => [
+    const rows = items.map(i => [
       i.name, i.sku, i.category?.name ?? "", i.quantity, i.unit,
       i.min_quantity ?? "", i.cost_per_unit, i.total_value ?? "",
       i.supplier?.name ?? "", i.location ?? "", getStockStatus(i),
@@ -317,14 +331,14 @@ export default function Inventory() {
                     ))}
                   </TableRow>
                 ))
-              ) : filtered.length === 0 ? (
+              ) : items.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
                     <Package className="w-8 h-8 mx-auto mb-2 opacity-50" />
                     No items found
                   </TableCell>
                 </TableRow>
-              ) : filtered.map((item) => {
+              ) : items.map((item) => {
                 const status = getStockStatus(item);
                 const badge  = stockBadgeMap[status];
                 const expiringSoon = item.expiry_date && new Date(item.expiry_date) < new Date(Date.now() + 30 * 864e5);
@@ -376,6 +390,9 @@ export default function Inventory() {
               })}
             </TableBody>
           </Table>
+          <div className="px-6 pb-6">
+            <ListPagination meta={pagination} onPageChange={(page) => void loadData(page)} />
+          </div>
         </CardContent>
       </Card>
 

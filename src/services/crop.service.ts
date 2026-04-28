@@ -1,13 +1,26 @@
 import { apiClient } from './api';
 import { Crop } from '@/types/common';
 import { API_ENDPOINTS } from '@/utils/constants';
+import { PaginatedResponse } from '@/types/api';
+import { buildQueryString, normalizePaginatedResponse } from '@/utils/paginated';
 
 class CropService {
-  async getCrops(fieldId?: string): Promise<Crop[]> {
-    const url = fieldId ? `${API_ENDPOINTS.CROPS}?field_id=${fieldId}` : API_ENDPOINTS.CROPS;
-    const res = await apiClient.get<any>(url);
-    const data = Array.isArray(res.data) ? res.data : (res.crops || res.data || res || []);
-    return Array.isArray(data) ? data : [];
+  async getCrops(params?: {
+    fieldId?: string;
+    page?: number;
+    perPage?: number;
+    search?: string;
+    status?: string;
+  }): Promise<PaginatedResponse<Crop>> {
+    const query = buildQueryString({
+      field_id: params?.fieldId,
+      page: params?.page,
+      per_page: params?.perPage,
+      search: params?.search,
+      status: params?.status,
+    });
+    const res = await apiClient.get<any>(`${API_ENDPOINTS.CROPS}${query}`);
+    return normalizePaginatedResponse<Crop>(res, params?.page, params?.perPage, ["crops"]);
   }
 
   async getCrop(id: string): Promise<Crop> {

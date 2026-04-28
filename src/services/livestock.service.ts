@@ -1,12 +1,26 @@
 import { apiClient } from './api';
 import { Livestock } from '@/types/common';
 import { API_ENDPOINTS } from '@/utils/constants';
+import { PaginatedResponse } from '@/types/api';
+import { buildQueryString, normalizePaginatedResponse } from '@/utils/paginated';
 
 class LivestockService {
-  async getLivestock(farmId?: string): Promise<Livestock[]> {
-    const url = farmId ? `${API_ENDPOINTS.LIVESTOCK}?farm_id=${farmId}` : API_ENDPOINTS.LIVESTOCK;
-    const res = await apiClient.get<any>(url);
-    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+  async getLivestock(params?: {
+    farmId?: string;
+    page?: number;
+    perPage?: number;
+    search?: string;
+    status?: string;
+  }): Promise<PaginatedResponse<Livestock>> {
+    const query = buildQueryString({
+      farm_id: params?.farmId,
+      page: params?.page,
+      per_page: params?.perPage,
+      search: params?.search,
+      status: params?.status,
+    });
+    const res = await apiClient.get<any>(`${API_ENDPOINTS.LIVESTOCK}${query}`);
+    return normalizePaginatedResponse<Livestock>(res, params?.page, params?.perPage, ["livestock"]);
   }
 
   async getLivestockItem(id: string): Promise<Livestock> {

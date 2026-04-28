@@ -15,6 +15,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { farmService } from "@/services/farm.service";
 import { BackendWorker, workerService } from "@/services/worker.service";
 import { Farm } from "@/types/common";
+import { PaginatedResponse } from "@/types/api";
+import { ListPagination } from "@/components/ListPagination";
 
 type WorkerStatus = "active" | "on-leave" | "inactive";
 type WorkerRole = "Farm Manager" | "Field Worker" | "Equipment Operator" | "Veterinarian" | "Irrigation Specialist" | "Harvester";
@@ -151,8 +153,17 @@ const emptyWorker = (farmId = ""): WorkerForm => ({
 });
 
 const Workers = () => {
+  const perPage = 10;
   const [workers, setWorkers] = useState<WorkerRow[]>([]);
   const [farms, setFarms] = useState<Farm[]>([]);
+  const [pagination, setPagination] = useState<PaginatedResponse<BackendWorker>["meta"]>({
+    current_page: 1,
+    from: 0,
+    to: 0,
+    total: 0,
+    per_page: perPage,
+    last_page: 1,
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -165,8 +176,16 @@ const Workers = () => {
   const { toast } = useToast();
 
   useEffect(() => {
-    loadData();
+    loadData(1);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadData(1);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [search, roleFilter, statusFilter]);
 
   const farmsById = useMemo(
     () =>
@@ -177,11 +196,17 @@ const Workers = () => {
     [farms]
   );
 
-  const loadData = async () => {
+  const loadData = async (page = pagination.current_page) => {
     setLoading(true);
     try {
-      const [workersData, farmsData] = await Promise.all([
-        workerService.getWorkers(),
+      const [workersResponse, farmsData] = await Promise.all([
+        workerService.getWorkers({
+          page,
+          perPage,
+          search,
+          role: roleFilter,
+          status: statusFilter,
+        }),
         farmService.getFarms(),
       ]);
       const safeFarms = Array.isArray(farmsData) ? farmsData : [];
@@ -189,9 +214,10 @@ const Workers = () => {
         acc[String(farm.id)] = farm;
         return acc;
       }, {});
-      const safeWorkers = Array.isArray(workersData) ? workersData : [];
+      const safeWorkers = Array.isArray(workersResponse?.data) ? workersResponse.data : [];
       setFarms(safeFarms);
       setWorkers(safeWorkers.map((worker) => mapBackendToWorker(worker, farmMap)));
+      setPagination(workersResponse.meta);
       if (!form.farmId && safeFarms[0]?.id) {
         setForm((current) => ({ ...current, farmId: String(safeFarms[0].id) }));
       }
@@ -206,30 +232,14 @@ const Workers = () => {
     }
   };
 
-  const filtered = useMemo(
-    () =>
-      workers.filter((worker) => {
-        const matchSearch =
-          worker.name.toLowerCase().includes(search.toLowerCase()) ||
-          worker.role.toLowerCase().includes(search.toLowerCase()) ||
-          worker.assignedArea.toLowerCase().includes(search.toLowerCase());
-        return (
-          matchSearch &&
-          (roleFilter === "all" || worker.role === roleFilter) &&
-          (statusFilter === "all" || worker.status === statusFilter)
-        );
-      }),
-    [workers, search, roleFilter, statusFilter]
-  );
-
   const counts = useMemo(
     () => ({
-      total: workers.length,
+      total: pagination.total,
       active: workers.filter((worker) => worker.status === "active").length,
       onLeave: workers.filter((worker) => worker.status === "on-leave").length,
       inactive: workers.filter((worker) => worker.status === "inactive").length,
     }),
-    [workers]
+    [workers, pagination.total]
   );
 
   const openAdd = () => {
@@ -279,7 +289,7 @@ const Workers = () => {
       setDialogOpen(false);
       setEditingWorker(null);
       setForm(emptyWorker(String(farms[0]?.id || "")));
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -297,7 +307,8 @@ const Workers = () => {
       await workerService.deleteWorker(deletingWorker.id);
       toast({ title: "Worker removed" });
       setDeletingWorker(null);
-      await loadData();
+      const nextPage = workers.length === 1 && pagination.current_page > 1 ? pagination.current_page - 1 : pagination.current_page;
+      await loadData(nextPage);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -319,20 +330,20 @@ const Workers = () => {
         status: status === "on-leave" ? "on_leave" : status,
       });
       toast({ title: "Worker status updated" });
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (error: any) {
       toast({
         title: "Error",
         description: error.message || "Failed to update worker status",
         variant: "destructive",
       });
-      await loadData();
+      await loadData(pagination.current_page);
     }
   };
 
   const handleExport = () => {
     const headers = ["Name", "Role", "Phone", "Email", "Status", "Hire Date", "Daily Wage", "Assigned Area"];
-    const rows = filtered.map((worker) => [
+    const rows = workers.map((worker) => [
       worker.name,
       worker.role,
       worker.phone,
@@ -402,7 +413,7 @@ const Workers = () => {
       />
 
       <Card>
-        <CardHeader><CardTitle>Workers ({filtered.length})</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Workers ({pagination.total})</CardTitle></CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
@@ -418,7 +429,7 @@ const Workers = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((worker) => (
+              {workers.map((worker) => (
                 <TableRow key={worker.id}>
                   <TableCell className="font-medium">{worker.name}</TableCell>
                   <TableCell>{worker.role}</TableCell>
@@ -439,11 +450,12 @@ const Workers = () => {
                   </TableCell>
                 </TableRow>
               ))}
-              {filtered.length === 0 && (
+              {workers.length === 0 && (
                 <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No workers found.</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
+          <ListPagination meta={pagination} onPageChange={(page) => void loadData(page)} />
         </CardContent>
       </Card>
 

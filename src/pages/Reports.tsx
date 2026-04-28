@@ -65,18 +65,18 @@ const Reports = () => {
     try {
       const [transactionsData, cropsData, livestockData, inventoryData, workersData, schedulesData] = await Promise.all([
         financeService.getTransactions(),
-        cropService.getCrops(),
+        cropService.getCrops({ page: 1, perPage: 1000 }),
         livestockService.getInventorySummary(),
-        inventoryService.getItems(),
-        workerService.getWorkers(),
-        scheduleService.getSchedules(),
+        inventoryService.getItems({ page: 1, perPage: 1000 }),
+        workerService.getWorkers({ page: 1, perPage: 1000 }),
+        scheduleService.getSchedules({ page: 1, perPage: 1000 }),
       ]);
       setTransactions(Array.isArray(transactionsData) ? transactionsData : []);
-      setCrops(Array.isArray(cropsData) ? cropsData : []);
+      setCrops(Array.isArray(cropsData?.data) ? cropsData.data : []);
       setLivestockSummary(Array.isArray(livestockData) ? livestockData : []);
-      setInventoryItems(Array.isArray(inventoryData) ? inventoryData : []);
-      setWorkers(Array.isArray(workersData) ? workersData : []);
-      setSchedules(Array.isArray(schedulesData) ? schedulesData : []);
+      setInventoryItems(Array.isArray(inventoryData?.data) ? inventoryData.data : []);
+      setWorkers(Array.isArray(workersData?.data) ? workersData.data : []);
+      setSchedules(Array.isArray(schedulesData?.data) ? schedulesData.data : []);
     } catch (error: any) {
       toast({
         title: "Error",

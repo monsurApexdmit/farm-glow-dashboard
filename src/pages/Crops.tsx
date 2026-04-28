@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { AppSidebar } from "@/components/AppSidebar";
 import { DashboardHeader } from "@/components/DashboardHeader";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,8 @@ import { toast } from "sonner";
 import { cropService } from "@/services/crop.service";
 import { farmService } from "@/services/farm.service";
 import { Crop as BackendCrop, Field } from "@/types/common";
+import { PaginatedResponse } from "@/types/api";
+import { ListPagination } from "@/components/ListPagination";
 
 export type CropStatus = "planning" | "growing" | "harvested";
 export type Season = "spring" | "summer" | "fall" | "winter";
@@ -97,8 +99,17 @@ const emptyForm: Omit<Crop, "id"> = {
 };
 
 const Crops = () => {
+  const perPage = 10;
   const [crops, setCrops] = useState<Crop[]>([]);
   const [fields, setFields] = useState<Field[]>([]);
+  const [pagination, setPagination] = useState<PaginatedResponse<Crop>["meta"]>({
+    current_page: 1,
+    from: 0,
+    to: 0,
+    total: 0,
+    per_page: perPage,
+    last_page: 1,
+  });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -109,18 +120,32 @@ const Crops = () => {
   const [form, setForm] = useState<Omit<Crop, "id">>(emptyForm);
 
   useEffect(() => {
-    loadData();
+    loadData(1);
   }, []);
 
-  const loadData = async () => {
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadData(1);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [search, statusFilter]);
+
+  const loadData = async (page = pagination.current_page) => {
     setLoading(true);
     try {
-      const [cropsData, fieldsData] = await Promise.all([
-        cropService.getCrops(),
+      const [cropsResponse, fieldsData] = await Promise.all([
+        cropService.getCrops({
+          page,
+          perPage,
+          search,
+          status: statusFilter,
+        }),
         farmService.getFields(),
       ]);
-      const formattedCrops = (Array.isArray(cropsData) ? cropsData : []).map(mapBackendToCrop);
+      const formattedCrops = (Array.isArray(cropsResponse?.data) ? cropsResponse.data : []).map(mapBackendToCrop);
       setCrops(formattedCrops);
+      setPagination(cropsResponse.meta);
       const parsedFields = Array.isArray(fieldsData) ? fieldsData : [];
       setFields(parsedFields);
     } catch (error: any) {
@@ -132,25 +157,21 @@ const Crops = () => {
     setLoading(false);
   };
 
-  const loadCrops = async () => {
+  const loadCrops = async (page = pagination.current_page) => {
     try {
-      const data = await cropService.getCrops();
-      const formattedCrops = (Array.isArray(data) ? data : []).map(mapBackendToCrop);
+      const response = await cropService.getCrops({
+        page,
+        perPage,
+        search,
+        status: statusFilter,
+      });
+      const formattedCrops = (Array.isArray(response?.data) ? response.data : []).map(mapBackendToCrop);
       setCrops(formattedCrops);
+      setPagination(response.meta);
     } catch (error: any) {
       toast.error(error.message || "Failed to load crops");
     }
   };
-
-  const filtered = useMemo(() => {
-    return crops.filter((c) => {
-      const matchSearch =
-        c.name.toLowerCase().includes(search.toLowerCase()) ||
-        c.variety.toLowerCase().includes(search.toLowerCase());
-      const matchStatus = statusFilter === "all" || c.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [crops, search, statusFilter]);
 
   const openAdd = () => {
     setEditingCrop(null);
@@ -189,7 +210,7 @@ const Crops = () => {
         toast.success(`${form.name} added successfully`);
       }
       setDialogOpen(false);
-      await loadCrops();
+      await loadCrops(pagination.current_page);
     } catch (error: any) {
       toast.error(error.message || "Failed to save crop");
     }
@@ -200,7 +221,8 @@ const Crops = () => {
       try {
         await cropService.deleteCrop(deletingCrop.id);
         toast.success(`${deletingCrop.name} deleted`);
-        await loadCrops();
+        const nextPage = crops.length === 1 && pagination.current_page > 1 ? pagination.current_page - 1 : pagination.current_page;
+        await loadCrops(nextPage);
       } catch (error: any) {
         toast.error(error.message || "Failed to delete crop");
       }
@@ -211,7 +233,7 @@ const Crops = () => {
 
   const exportCSV = () => {
     const headers = ["Name", "Variety", "Field/Area", "Planted Date", "Expected Harvest", "Status", "Season", "Yield Estimate", "Notes"];
-    const rows = filtered.map((c) => [c.name, c.variety, c.fieldArea, c.plantedDate, c.expectedHarvest, c.status, c.season, c.yieldEstimate, c.notes]);
+    const rows = crops.map((c) => [c.name, c.variety, c.fieldArea, c.plantedDate, c.expectedHarvest, c.status, c.season, c.yieldEstimate, c.notes]);
     const csv = [headers.join(","), ...rows.map((r) => r.map((v) => `"${v}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -228,14 +250,14 @@ const Crops = () => {
       const backendData = mapCropToBackend({ ...crop, status: newStatus });
       await cropService.updateCrop(crop.id, backendData);
       toast.success(`${crop.name} status updated to ${statusConfig[newStatus].label}`);
-      await loadCrops();
+      await loadCrops(pagination.current_page);
     } catch (error: any) {
       toast.error(error.message || "Failed to update status");
     }
   };
 
   const counts = {
-    total: crops.length,
+    total: pagination.total,
     planning: crops.filter((c) => c.status === "planning").length,
     growing: crops.filter((c) => c.status === "growing").length,
     harvested: crops.filter((c) => c.status === "harvested").length,
@@ -337,7 +359,7 @@ const Crops = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.length === 0 ? (
+                  {crops.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-12 text-muted-foreground">
                         <Sprout className="w-10 h-10 mx-auto mb-2 opacity-30" />
@@ -345,7 +367,7 @@ const Crops = () => {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filtered.map((crop) => (
+                    crops.map((crop) => (
                       <TableRow key={crop.id}>
                         <TableCell>
                           <div>
@@ -389,6 +411,9 @@ const Crops = () => {
                   )}
                 </TableBody>
               </Table>
+              <div className="px-4 pb-4">
+                <ListPagination meta={pagination} onPageChange={(page) => void loadData(page)} />
+              </div>
             </CardContent>
           </Card>
         </main>

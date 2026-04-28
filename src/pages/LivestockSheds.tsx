@@ -225,10 +225,10 @@ const LivestockSheds = () => {
       const [shedsData, farmsData, livestockData] = await Promise.all([
         shedService.getSheds(),
         farmService.getFarms(),
-        livestockService.getLivestock(),
+        livestockService.getLivestock({ page: 1, perPage: 1000 }),
       ]);
 
-      const liveArr: BackendLivestock[] = Array.isArray(livestockData) ? livestockData : [];
+      const liveArr: BackendLivestock[] = Array.isArray(livestockData?.data) ? livestockData.data : [];
       const shedsArr = Array.isArray(shedsData) ? shedsData : [];
 
       // auto-assign grid positions for new sheds that have no saved position

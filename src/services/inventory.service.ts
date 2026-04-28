@@ -1,5 +1,7 @@
 import { apiClient } from './api';
 import { API_ENDPOINTS } from '@/utils/constants';
+import { PaginatedResponse } from '@/types/api';
+import { buildQueryString, normalizePaginatedResponse } from '@/utils/paginated';
 
 export interface BackendInventoryItem {
   id: string;
@@ -46,9 +48,24 @@ class InventoryService {
     return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
   }
 
-  async getItems(farmId?: string): Promise<BackendInventoryItem[]> {
-    const url = farmId ? `${API_ENDPOINTS.INVENTORY}?farm_id=${farmId}` : API_ENDPOINTS.INVENTORY;
-    return this.list<BackendInventoryItem>(await apiClient.get<any>(url));
+  async getItems(params?: {
+    farmId?: string;
+    page?: number;
+    perPage?: number;
+    search?: string;
+    category?: string;
+    stock?: string;
+  }): Promise<PaginatedResponse<BackendInventoryItem>> {
+    const query = buildQueryString({
+      farm_id: params?.farmId,
+      page: params?.page,
+      per_page: params?.perPage,
+      search: params?.search,
+      category: params?.category,
+      stock: params?.stock,
+    });
+    const res = await apiClient.get<any>(`${API_ENDPOINTS.INVENTORY}${query}`);
+    return normalizePaginatedResponse<BackendInventoryItem>(res, params?.page, params?.perPage, ["items", "inventory"]);
   }
 
   async getItem(id: string): Promise<BackendInventoryItem> {

@@ -27,6 +27,8 @@ import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import { scheduleService, BackendSchedule } from "@/services/schedule.service";
 import { BackendWorker, workerService } from "@/services/worker.service";
+import { PaginatedResponse } from "@/types/api";
+import { ListPagination } from "@/components/ListPagination";
 
 type TaskPriority = "Low" | "Medium" | "High" | "Urgent";
 type TaskStatus = "Pending" | "In Progress" | "Completed" | "Overdue";
@@ -186,9 +188,18 @@ const mapBackendToTask = (
 };
 
 export default function Schedule() {
+  const perPage = 10;
   const { toast } = useToast();
   const [tasks, setTasks] = useState<ScheduleTask[]>([]);
   const [workers, setWorkers] = useState<BackendWorker[]>([]);
+  const [pagination, setPagination] = useState<PaginatedResponse<BackendSchedule>["meta"]>({
+    current_page: 1,
+    from: 0,
+    to: 0,
+    total: 0,
+    per_page: perPage,
+    last_page: 1,
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -203,34 +214,51 @@ export default function Schedule() {
   const [taskMeta, setTaskMeta] = useState<Record<string, ScheduleMeta>>(() => readScheduleMeta());
 
   useEffect(() => {
-    loadData();
+    loadData(1);
   }, []);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadData(1);
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [search, filterCategory, filterStatus, filterPriority, selectedDate]);
 
   const persistMeta = (nextMeta: Record<string, ScheduleMeta>) => {
     setTaskMeta(nextMeta);
     writeScheduleMeta(nextMeta);
   };
 
-  const loadData = async () => {
+  const loadData = async (page = pagination.current_page) => {
     setLoading(true);
     try {
-      const [scheduleData, workerData] = await Promise.all([
-        scheduleService.getSchedules(),
-        workerService.getWorkers(),
+      const [scheduleResponse, workerResponse] = await Promise.all([
+        scheduleService.getSchedules({
+          page,
+          perPage,
+          search,
+          category: filterCategory,
+          status: filterStatus,
+          priority: filterPriority,
+          date: selectedDate ? format(selectedDate, "yyyy-MM-dd") : undefined,
+        }),
+        workerService.getWorkers({ page: 1, perPage: 1000 }),
       ]);
-      const safeWorkers = Array.isArray(workerData) ? workerData : [];
+      const safeWorkers = Array.isArray(workerResponse?.data) ? workerResponse.data : [];
       const workersById = safeWorkers.reduce<Record<string, BackendWorker>>((acc, worker) => {
         acc[String(worker.id)] = worker;
         return acc;
       }, {});
 
       const meta = readScheduleMeta();
-      const mapped = (Array.isArray(scheduleData) ? scheduleData : []).map((schedule) =>
+      const mapped = (Array.isArray(scheduleResponse?.data) ? scheduleResponse.data : []).map((schedule) =>
         mapBackendToTask(schedule, workersById, meta)
       );
 
       setWorkers(safeWorkers);
       setTasks(mapped);
+      setPagination(scheduleResponse.meta);
       setTaskMeta(meta);
     } catch (error: any) {
       toast({
@@ -251,21 +279,6 @@ export default function Schedule() {
         farmId: String(worker.farm_id || ""),
       })),
     [workers]
-  );
-
-  const filtered = useMemo(
-    () =>
-      tasks.filter((task) => {
-        const matchSearch =
-          task.title.toLowerCase().includes(search.toLowerCase()) ||
-          task.assignee.toLowerCase().includes(search.toLowerCase());
-        const matchCategory = filterCategory === "all" || task.category === filterCategory;
-        const matchStatus = filterStatus === "all" || task.status === filterStatus;
-        const matchPriority = filterPriority === "all" || task.priority === filterPriority;
-        const matchDate = !selectedDate || task.dueDate === format(selectedDate, "yyyy-MM-dd");
-        return matchSearch && matchCategory && matchStatus && matchPriority && matchDate;
-      }),
-    [tasks, search, filterCategory, filterStatus, filterPriority, selectedDate]
   );
 
   const openAdd = () => {
@@ -340,7 +353,7 @@ export default function Schedule() {
       setEditingTask(null);
       setForm(emptyForm());
       toast({ title: editingTask ? "Task updated" : "Task added" });
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -361,7 +374,8 @@ export default function Schedule() {
       persistMeta(nextMeta);
       setDeleteId(null);
       toast({ title: "Task deleted" });
-      await loadData();
+      const nextPage = tasks.length === 1 && pagination.current_page > 1 ? pagination.current_page - 1 : pagination.current_page;
+      await loadData(nextPage);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -393,20 +407,20 @@ export default function Schedule() {
     try {
       await scheduleService.updateSchedule(id, { status: mapUiStatusToBackend(status) });
       toast({ title: "Task status updated" });
-      await loadData();
+      await loadData(pagination.current_page);
     } catch (error: any) {
       toast({
         title: "Error",
         description: error.message || "Failed to update task status",
         variant: "destructive",
       });
-      await loadData();
+      await loadData(pagination.current_page);
     }
   };
 
   const exportCSV = () => {
     const headers = ["Title", "Category", "Priority", "Status", "Assignee", "Start Date", "Due Date"];
-    const rows = filtered.map((task) => [task.title, task.category, task.priority, task.status, task.assignee, task.startDate, task.dueDate]);
+    const rows = tasks.map((task) => [task.title, task.category, task.priority, task.status, task.assignee, task.startDate, task.dueDate]);
     const csv = [headers, ...rows].map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -523,9 +537,9 @@ export default function Schedule() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.length === 0 ? (
+                  {tasks.length === 0 ? (
                     <TableRow><TableCell colSpan={7} className="text-center py-8 text-muted-foreground"><ClipboardList className="w-8 h-8 mx-auto mb-2 opacity-50" />No tasks found</TableCell></TableRow>
-                  ) : filtered.map((task) => (
+                  ) : tasks.map((task) => (
                     <TableRow key={task.id}>
                       <TableCell>
                         <div className="font-medium">{task.title}</div>
@@ -549,6 +563,7 @@ export default function Schedule() {
                   ))}
                 </TableBody>
               </Table>
+              <ListPagination meta={pagination} onPageChange={(page) => void loadData(page)} />
             </CardContent>
           </Card>
         </div>

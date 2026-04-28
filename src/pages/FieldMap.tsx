@@ -322,12 +322,12 @@ const FieldMap = () => {
       const [farmsData, fieldsData, cropsData] = await Promise.all([
         farmService.getFarms(),
         farmService.getFields(),
-        cropService.getCrops(),
+        cropService.getCrops({ page: 1, perPage: 1000 }),
       ]);
 
       const safeFarms = Array.isArray(farmsData) ? farmsData : [];
       const safeFields = Array.isArray(fieldsData) ? fieldsData : [];
-      const safeCrops = Array.isArray(cropsData) ? cropsData : [];
+      const safeCrops = Array.isArray(cropsData?.data) ? cropsData.data : [];
 
       const mapResponses = await Promise.allSettled(
         safeFields.map(async (field) => [field.id, extractFieldMapMeta(await farmService.getFieldMap(field.id))] as const)

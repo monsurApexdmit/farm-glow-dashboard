@@ -1,5 +1,7 @@
 import { apiClient } from './api';
 import { API_ENDPOINTS } from '@/utils/constants';
+import { PaginatedResponse } from '@/types/api';
+import { buildQueryString, normalizePaginatedResponse } from '@/utils/paginated';
 
 export interface BackendSchedule {
   id: string;
@@ -23,10 +25,28 @@ export interface BackendSchedule {
 }
 
 class ScheduleService {
-  async getSchedules(farmId?: string): Promise<BackendSchedule[]> {
-    const url = farmId ? `${API_ENDPOINTS.SCHEDULES}?farm_id=${farmId}` : API_ENDPOINTS.SCHEDULES;
-    const res = await apiClient.get<any>(url);
-    return Array.isArray(res) ? res : (Array.isArray(res?.data) ? res.data : []);
+  async getSchedules(params?: {
+    farmId?: string;
+    page?: number;
+    perPage?: number;
+    search?: string;
+    category?: string;
+    status?: string;
+    priority?: string;
+    date?: string;
+  }): Promise<PaginatedResponse<BackendSchedule>> {
+    const query = buildQueryString({
+      farm_id: params?.farmId,
+      page: params?.page,
+      per_page: params?.perPage,
+      search: params?.search,
+      category: params?.category,
+      status: params?.status,
+      priority: params?.priority,
+      date: params?.date,
+    });
+    const res = await apiClient.get<any>(`${API_ENDPOINTS.SCHEDULES}${query}`);
+    return normalizePaginatedResponse<BackendSchedule>(res, params?.page, params?.perPage, ["schedules"]);
   }
 
   async getSchedule(id: string): Promise<BackendSchedule> {
